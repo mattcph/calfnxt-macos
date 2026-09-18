@@ -1,0 +1,5 @@
+# Build tree (CMake superbuild output)
+/build/
+# Symlinks into the upstream submodule created at configure time
+/tools/codegen
+/ui/src

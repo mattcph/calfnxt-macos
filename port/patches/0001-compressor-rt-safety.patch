@@ -1,0 +1,184 @@
+From 2adb195d1e39a4daa729f578b1a36e9e8c6faea4 Mon Sep 17 00:00:00 2001
+From: Matt Hardy <matt@deuso.de>
+Date: Fri, 18 Sep 2026 12:51:48 +0200
+Subject: [PATCH] compressor: remove audio-thread mutexes (viz point atomics,
+ hist seqlock)
+
+The audio thread took vizMutex_ per sample (operating point) and histMutex_
+per block (envelope snapshot). Replace with:
+- std::atomic<float> for the per-sample operating point (relaxed)
+- a seqlock (odd/even sequence) for the per-block envelope snapshot;
+  the UI reader retries on a torn read, the audio thread never blocks
+- publishHistSnapshot() early-outs when no viz consumer is active
+
+GPL-3.0-or-later.
+---
+ dsp/compressor/source/compressor_dsp.cpp | 61 ++++++++++++------------
+ dsp/compressor/source/compressor_dsp.h   | 13 +++--
+ 2 files changed, 40 insertions(+), 34 deletions(-)
+
+diff --git a/dsp/compressor/source/compressor_dsp.cpp b/dsp/compressor/source/compressor_dsp.cpp
+index 22e0462..97c8a64 100644
+--- a/dsp/compressor/source/compressor_dsp.cpp
++++ b/dsp/compressor/source/compressor_dsp.cpp
+@@ -78,24 +78,20 @@ void CompressorPlugin::resetProcessing()
+   sc_.setSampleRate(static_cast<float>(sampleRate_));
+   sc_.reset();
+   grMeter_.reset(static_cast<float>(sampleRate_));
+-  {
+-    std::lock_guard<std::mutex> lock(vizMutex_);
+-    pointInDb_ = -96.f;
+-    pointOutDb_ = -96.f;
+-  }
++  pointInDb_.store(-96.f, std::memory_order_relaxed);
++  pointOutDb_.store(-96.f, std::memory_order_relaxed);
+ 
+   std::memset(histBuf_, 0, sizeof(histBuf_));
+   histPos_ = 0;
+   histSampleCount_ = 0;
+   histSamplesPerSlot_ = 1;
+   histVisibleSlots_ = 160;
+-  {
+-    std::lock_guard<std::mutex> lock(histMutex_);
+-    std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
+-    histSnapshotPos_ = 0;
+-    histSnapshotSampleCount_ = 0;
+-    histSnapshotSamplesPerSlot_ = 1;
+-  }
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
++  std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
++  histSnapshotPos_ = 0;
++  histSnapshotSampleCount_ = 0;
++  histSnapshotSamplesPerSlot_ = 1;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ tresult PLUGIN_API CompressorPlugin::setActive(TBool state)
+@@ -152,11 +148,14 @@ void CompressorPlugin::histFeedSample(float audioPeakLin, float detPeakLin, floa
+ 
+ void CompressorPlugin::publishHistSnapshot()
+ {
+-  std::lock_guard<std::mutex> lock(histMutex_);
++  if (!vizConsumerActive())
++    return;
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
+   std::memcpy(histSnapshot_, histBuf_, sizeof(histBuf_));
+   histSnapshotPos_ = histPos_;
+   histSnapshotSampleCount_ = histSampleCount_;
+   histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ void CompressorPlugin::processSample(const BlockState& state, float& L, float& R, float scL,
+@@ -199,12 +198,9 @@ void CompressorPlugin::processSample(const BlockState& state, float& L, float& R
+     gr_.processDetector(detL, detR); // keep detector state continuous
+     grMeter_.forceZero();
+     histFeedSample(audioPeak, detPeak, 1.f);
+-    {
+-      std::lock_guard<std::mutex> lock(vizMutex_);
+-      const float inDb = linToDbSafe(gr_.lastDetectorLin());
+-      pointInDb_ = inDb;
+-      pointOutDb_ = inDb;
+-    }
++    const float inDb = linToDbSafe(gr_.lastDetectorLin());
++    pointInDb_.store(inDb, std::memory_order_relaxed);
++    pointOutDb_.store(inDb, std::memory_order_relaxed);
+     return;
+   }
+ 
+@@ -217,11 +213,8 @@ void CompressorPlugin::processSample(const BlockState& state, float& L, float& R
+   const float inDb = linToDbSafe(det);
+   const float outDb =
+     inDb + linToDbSafe(gr_.lastCurveGain()) + state.makeupDb;
+-  {
+-    std::lock_guard<std::mutex> lock(vizMutex_);
+-    pointInDb_ = inDb;
+-    pointOutDb_ = outDb;
+-  }
++  pointInDb_.store(inDb, std::memory_order_relaxed);
++  pointOutDb_.store(outDb, std::memory_order_relaxed);
+ 
+   const float wetL = dryL * gr * state.makeupLin;
+   const float wetR = dryR * gr * state.makeupLin;
+@@ -242,9 +235,8 @@ int CompressorPlugin::takeDynamicsPoint(float* out, int maxOut)
+ {
+   if (!out || maxOut < 2)
+     return 0;
+-  std::lock_guard<std::mutex> lock(vizMutex_);
+-  out[0] = pointInDb_;
+-  out[1] = pointOutDb_;
++  out[0] = pointInDb_.load(std::memory_order_relaxed);
++  out[1] = pointOutDb_.load(std::memory_order_relaxed);
+   return 2;
+ }
+ 
+@@ -256,8 +248,12 @@ int CompressorPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+     return 0;
+ 
+   float phase = 0.f;
++  // Seqlock read: retry while the audio thread is mid-publish.
++  for (int attempt = 0; attempt < 8; ++attempt)
+   {
+-    std::lock_guard<std::mutex> lock(histMutex_);
++    const uint32_t s0 = histSeq_.load(std::memory_order_acquire);
++    if (s0 & 1u)
++      continue; // write in progress
+     const int startPos =
+       (kHistBufSize + histSnapshotPos_ - (slots - 1) * kHistChannels) % kHistBufSize;
+     const int sps = std::max(1, histSnapshotSamplesPerSlot_);
+@@ -272,9 +268,14 @@ int CompressorPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+         gr = 1.f;
+       out[i * kHistChannels + 2] = std::clamp(gr, 1.0e-6f, 1.f);
+     }
++    const uint32_t s1 = histSeq_.load(std::memory_order_acquire);
++    if (s0 == s1)
++    {
++      out[outCount] = std::clamp(phase, 0.f, 1.f);
++      return outCount + 1;
++    }
+   }
+-  out[outCount] = std::clamp(phase, 0.f, 1.f);
+-  return outCount + 1;
++  return 0; // contended; skip this frame
+ }
+ 
+ void CompressorPlugin::configureVizBins(const char* id, int bins)
+diff --git a/dsp/compressor/source/compressor_dsp.h b/dsp/compressor/source/compressor_dsp.h
+index ab2b7c5..1a4740b 100644
+--- a/dsp/compressor/source/compressor_dsp.h
++++ b/dsp/compressor/source/compressor_dsp.h
+@@ -9,6 +9,7 @@
+ 
+ #include "compressor_params.h"
+ 
++#include <atomic>
+ #include <cstring>
+ #include <mutex>
+ 
+@@ -81,15 +82,19 @@ private:
+   Dsp::GainReduction gr_;
+   Dsp::SidechainFilter sc_;
+   Dsp::GrMeter grMeter_;
+-  std::mutex vizMutex_;
+-  float pointInDb_ = -96.f;
+-  float pointOutDb_ = -96.f;
++  /* Operating point written per sample on the audio thread, read on the UI
++   * poll. Atomics, not a mutex — the audio thread must never block. */
++  std::atomic<float> pointInDb_ {-96.f};
++  std::atomic<float> pointOutDb_ {-96.f};
+ 
+   float histBuf_[kHistBufSize] {};
+   int histPos_ = 0;
+   int histSampleCount_ = 0;
+   int histSamplesPerSlot_ = 1;
+-  std::mutex histMutex_;
++  /* Snapshot published once per block from the audio thread, read on the UI
++   * poll. Seqlock (odd/even sequence) — the audio thread never blocks; the
++   * reader retries on a torn read. */
++  std::atomic<uint32_t> histSeq_ {0};
+   float histSnapshot_[kHistBufSize] {};
+   int histSnapshotPos_ = 0;
+   int histSnapshotSampleCount_ = 0;
+-- 
+2.54.0 (Apple Git-157)
+

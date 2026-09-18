@@ -1,0 +1,1022 @@
+From 53ad873dd42060d4b22971f2f3e9aff86ab9bbcd Mon Sep 17 00:00:00 2001
+From: Matt Hardy <matt@deuso.de>
+Date: Fri, 18 Sep 2026 12:57:09 +0200
+Subject: [PATCH] dynamics/tools: remove audio-thread viz mutexes across 8
+ plugins
+
+Same pattern as the compressor: per-sample scalars become std::atomic<float>
+(expander point, mbcomp per-band points), per-block array snapshots become a
+seqlock (odd/even sequence; UI reader retries, audio thread never blocks).
+Every publish*Snapshot() early-outs when no viz consumer is active.
+
+deesser, expander, limiter, mbcomp, mblimiter, octaver, transients, tuner.
+
+GPL-3.0-or-later.
+---
+ dsp/deesser/source/deesser_dsp.cpp       | 33 +++++++----
+ dsp/deesser/source/deesser_dsp.h         |  7 ++-
+ dsp/expander/source/expander_dsp.cpp     | 61 +++++++++----------
+ dsp/expander/source/expander_dsp.h       | 14 +++--
+ dsp/limiter/source/limiter_dsp.cpp       | 33 +++++++----
+ dsp/limiter/source/limiter_dsp.h         |  6 +-
+ dsp/mbcomp/source/mbcomp_dsp.cpp         | 74 ++++++++++++------------
+ dsp/mbcomp/source/mbcomp_dsp.h           | 14 +++--
+ dsp/mblimiter/source/mblimiter_dsp.cpp   | 35 +++++++----
+ dsp/mblimiter/source/mblimiter_dsp.h     |  6 +-
+ dsp/octaver/source/octaver_dsp.cpp       | 52 ++++++++++-------
+ dsp/octaver/source/octaver_dsp.h         |  6 +-
+ dsp/transients/source/transients_dsp.cpp | 33 +++++++----
+ dsp/transients/source/transients_dsp.h   |  7 ++-
+ dsp/tuner/source/tuner_dsp.cpp           | 52 ++++++++++-------
+ dsp/tuner/source/tuner_dsp.h             |  6 +-
+ 16 files changed, 264 insertions(+), 175 deletions(-)
+
+diff --git a/dsp/deesser/source/deesser_dsp.cpp b/dsp/deesser/source/deesser_dsp.cpp
+index 6de6333..3c7b2d2 100644
+--- a/dsp/deesser/source/deesser_dsp.cpp
++++ b/dsp/deesser/source/deesser_dsp.cpp
+@@ -68,13 +68,12 @@ void DeesserPlugin::resetProcessing()
+   histSampleCount_ = 0;
+   histSamplesPerSlot_ = 1;
+   histVisibleSlots_ = 160;
+-  {
+-    std::lock_guard<std::mutex> lock(histMutex_);
+-    std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
+-    histSnapshotPos_ = 0;
+-    histSnapshotSampleCount_ = 0;
+-    histSnapshotSamplesPerSlot_ = 1;
+-  }
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
++  std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
++  histSnapshotPos_ = 0;
++  histSnapshotSampleCount_ = 0;
++  histSnapshotSamplesPerSlot_ = 1;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ tresult PLUGIN_API DeesserPlugin::setActive(TBool state)
+@@ -127,11 +126,14 @@ void DeesserPlugin::histFeedSample(float audioPeakLin, float detPeakLin, float g
+ 
+ void DeesserPlugin::publishHistSnapshot()
+ {
+-  std::lock_guard<std::mutex> lock(histMutex_);
++  if (!vizConsumerActive())
++    return;
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
+   std::memcpy(histSnapshot_, histBuf_, sizeof(histBuf_));
+   histSnapshotPos_ = histPos_;
+   histSnapshotSampleCount_ = histSampleCount_;
+   histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ void DeesserPlugin::processSample(const BlockState& state, float& L, float& R)
+@@ -218,8 +220,12 @@ int DeesserPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+     return 0;
+ 
+   float phase = 0.f;
++  // Seqlock read: retry while the audio thread is mid-publish.
++  for (int attempt = 0; attempt < 8; ++attempt)
+   {
+-    std::lock_guard<std::mutex> lock(histMutex_);
++    const uint32_t s0 = histSeq_.load(std::memory_order_acquire);
++    if (s0 & 1u)
++      continue; // write in progress
+     const int startPos =
+       (kHistBufSize + histSnapshotPos_ - (slots - 1) * kHistChannels) % kHistBufSize;
+     const int sps = std::max(1, histSnapshotSamplesPerSlot_);
+@@ -234,9 +240,14 @@ int DeesserPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+         gr = 1.f;
+       out[i * kHistChannels + 2] = std::clamp(gr, 1.0e-6f, 1.f);
+     }
++    const uint32_t s1 = histSeq_.load(std::memory_order_acquire);
++    if (s0 == s1)
++    {
++      out[outCount] = std::clamp(phase, 0.f, 1.f);
++      return outCount + 1;
++    }
+   }
+-  out[outCount] = std::clamp(phase, 0.f, 1.f);
+-  return outCount + 1;
++  return 0; // contended; skip this frame
+ }
+ 
+ void DeesserPlugin::configureVizBins(const char* id, int bins)
+diff --git a/dsp/deesser/source/deesser_dsp.h b/dsp/deesser/source/deesser_dsp.h
+index 0a51ddc..f60128a 100644
+--- a/dsp/deesser/source/deesser_dsp.h
++++ b/dsp/deesser/source/deesser_dsp.h
+@@ -10,8 +10,8 @@
+ 
+ #include "deesser_params.h"
+ 
++#include <atomic>
+ #include <cstring>
+-#include <mutex>
+ 
+ namespace calfNXT {
+ namespace Deesser {
+@@ -89,7 +89,10 @@ private:
+   int histPos_ = 0;
+   int histSampleCount_ = 0;
+   int histSamplesPerSlot_ = 1;
+-  std::mutex histMutex_;
++  /* Snapshot published once per block from the audio thread, read on the UI
++   * poll. Seqlock (odd/even sequence) — the audio thread never blocks; the
++   * reader retries on a torn read. */
++  std::atomic<uint32_t> histSeq_ {0};
+   float histSnapshot_[kHistBufSize] {};
+   int histSnapshotPos_ = 0;
+   int histSnapshotSampleCount_ = 0;
+diff --git a/dsp/expander/source/expander_dsp.cpp b/dsp/expander/source/expander_dsp.cpp
+index 3d4ddf8..10c6fab 100644
+--- a/dsp/expander/source/expander_dsp.cpp
++++ b/dsp/expander/source/expander_dsp.cpp
+@@ -125,24 +125,20 @@ void ExpanderPlugin::resetProcessing()
+     invAmount_[i] = 0.f;
+   }
+   grMeter_.reset(static_cast<float>(sampleRate_));
+-  {
+-    std::lock_guard<std::mutex> lock(vizMutex_);
+-    pointInDb_ = -96.f;
+-    pointOutDb_ = -96.f;
+-  }
++  pointInDb_.store(-96.f, std::memory_order_relaxed);
++  pointOutDb_.store(-96.f, std::memory_order_relaxed);
+ 
+   std::memset(histBuf_, 0, sizeof(histBuf_));
+   histPos_ = 0;
+   histSampleCount_ = 0;
+   histSamplesPerSlot_ = 1;
+   histVisibleSlots_ = 160;
+-  {
+-    std::lock_guard<std::mutex> lock(histMutex_);
+-    std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
+-    histSnapshotPos_ = 0;
+-    histSnapshotSampleCount_ = 0;
+-    histSnapshotSamplesPerSlot_ = 1;
+-  }
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
++  std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
++  histSnapshotPos_ = 0;
++  histSnapshotSampleCount_ = 0;
++  histSnapshotSamplesPerSlot_ = 1;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ tresult PLUGIN_API ExpanderPlugin::setActive(TBool state)
+@@ -214,11 +210,14 @@ void ExpanderPlugin::histFeedSample(float audioPeakLin, float detPeakLin, float
+ 
+ void ExpanderPlugin::publishHistSnapshot()
+ {
+-  std::lock_guard<std::mutex> lock(histMutex_);
++  if (!vizConsumerActive())
++    return;
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
+   std::memcpy(histSnapshot_, histBuf_, sizeof(histBuf_));
+   histSnapshotPos_ = histPos_;
+   histSnapshotSampleCount_ = histSampleCount_;
+   histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ void ExpanderPlugin::processSample(const BlockState& state, float& L, float& R, float scL,
+@@ -321,12 +320,9 @@ void ExpanderPlugin::processSample(const BlockState& state, float& L, float& R,
+     gx_.processDetector(detL, detR);
+     grMeter_.forceZero();
+     histFeedSample(audioPeak, detPeak, 1.f, inhibitCombined);
+-    {
+-      std::lock_guard<std::mutex> lock(vizMutex_);
+-      const float inDb = linToDbSafe(gx_.lastDetectorLin());
+-      pointInDb_ = inDb;
+-      pointOutDb_ = inDb;
+-    }
++    const float inDb = linToDbSafe(gx_.lastDetectorLin());
++    pointInDb_.store(inDb, std::memory_order_relaxed);
++    pointOutDb_.store(inDb, std::memory_order_relaxed);
+     return;
+   }
+ 
+@@ -348,11 +344,8 @@ void ExpanderPlugin::processSample(const BlockState& state, float& L, float& R,
+ 
+   const float inDb = linToDbSafe(det);
+   const float grLawDb = linToDbSafe(grLaw);
+-  {
+-    std::lock_guard<std::mutex> lock(vizMutex_);
+-    pointInDb_ = inDb;
+-    pointOutDb_ = inDb + grLawDb;
+-  }
++  pointInDb_.store(inDb, std::memory_order_relaxed);
++  pointOutDb_.store(inDb + grLawDb, std::memory_order_relaxed);
+ 
+   L = dryL * gr;
+   R = dryR * gr;
+@@ -379,9 +372,8 @@ int ExpanderPlugin::takeDynamicsPoint(float* out, int maxOut)
+ {
+   if (!out || maxOut < 2)
+     return 0;
+-  std::lock_guard<std::mutex> lock(vizMutex_);
+-  out[0] = pointInDb_;
+-  out[1] = pointOutDb_;
++  out[0] = pointInDb_.load(std::memory_order_relaxed);
++  out[1] = pointOutDb_.load(std::memory_order_relaxed);
+   return 2;
+ }
+ 
+@@ -393,8 +385,12 @@ int ExpanderPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+     return 0;
+ 
+   float phase = 0.f;
++  // Seqlock read: retry while the audio thread is mid-publish.
++  for (int attempt = 0; attempt < 8; ++attempt)
+   {
+-    std::lock_guard<std::mutex> lock(histMutex_);
++    const uint32_t s0 = histSeq_.load(std::memory_order_acquire);
++    if (s0 & 1u)
++      continue; // write in progress
+     const int startPos =
+       (kHistBufSize + histSnapshotPos_ - (slots - 1) * kHistChannels) % kHistBufSize;
+     const int sps = std::max(1, histSnapshotSamplesPerSlot_);
+@@ -411,9 +407,14 @@ int ExpanderPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+       out[i * kHistChannels + 3] =
+         std::clamp(std::fabs(histSnapshot_[srcIdx + 3]), 0.f, 1.f);
+     }
++    const uint32_t s1 = histSeq_.load(std::memory_order_acquire);
++    if (s0 == s1)
++    {
++      out[outCount] = std::clamp(phase, 0.f, 1.f);
++      return outCount + 1;
++    }
+   }
+-  out[outCount] = std::clamp(phase, 0.f, 1.f);
+-  return outCount + 1;
++  return 0; // contended; skip this frame
+ }
+ 
+ void ExpanderPlugin::configureVizBins(const char* id, int bins)
+diff --git a/dsp/expander/source/expander_dsp.h b/dsp/expander/source/expander_dsp.h
+index 84e10e1..48ab47d 100644
+--- a/dsp/expander/source/expander_dsp.h
++++ b/dsp/expander/source/expander_dsp.h
+@@ -10,8 +10,8 @@
+ 
+ #include "expander_params.h"
+ 
++#include <atomic>
+ #include <cstring>
+-#include <mutex>
+ 
+ namespace calfNXT {
+ namespace Expander {
+@@ -136,15 +136,19 @@ private:
+   InhibitEnv invEnv_[kInhibitCount];
+   float invAmount_[kInhibitCount] {};
+   Dsp::GrMeter grMeter_;
+-  std::mutex vizMutex_;
+-  float pointInDb_ = -96.f;
+-  float pointOutDb_ = -96.f;
++  /* Operating point written per sample on the audio thread, read on the UI
++   * poll. Atomics, not a mutex — the audio thread must never block. */
++  std::atomic<float> pointInDb_ {-96.f};
++  std::atomic<float> pointOutDb_ {-96.f};
+ 
+   float histBuf_[kHistBufSize] {};
+   int histPos_ = 0;
+   int histSampleCount_ = 0;
+   int histSamplesPerSlot_ = 1;
+-  std::mutex histMutex_;
++  /* Snapshot published once per block from the audio thread, read on the UI
++   * poll. Seqlock (odd/even sequence) — the audio thread never blocks; the
++   * reader retries on a torn read. */
++  std::atomic<uint32_t> histSeq_ {0};
+   float histSnapshot_[kHistBufSize] {};
+   int histSnapshotPos_ = 0;
+   int histSnapshotSampleCount_ = 0;
+diff --git a/dsp/limiter/source/limiter_dsp.cpp b/dsp/limiter/source/limiter_dsp.cpp
+index 1c589fe..044c7cf 100644
+--- a/dsp/limiter/source/limiter_dsp.cpp
++++ b/dsp/limiter/source/limiter_dsp.cpp
+@@ -150,13 +150,12 @@ void LimiterPlugin::resetProcessing()
+   histSampleCount_ = 0;
+   histSamplesPerSlot_ = 1;
+   histVisibleSlots_ = 160;
+-  {
+-    std::lock_guard<std::mutex> lock(histMutex_);
+-    std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
+-    histSnapshotPos_ = 0;
+-    histSnapshotSampleCount_ = 0;
+-    histSnapshotSamplesPerSlot_ = 1;
+-  }
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
++  std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
++  histSnapshotPos_ = 0;
++  histSnapshotSampleCount_ = 0;
++  histSnapshotSamplesPerSlot_ = 1;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ 
+   applyParams(true);
+   updateLatency(false);
+@@ -246,11 +245,14 @@ void LimiterPlugin::histFeedSample(float audioPeakLin, float grLin)
+ 
+ void LimiterPlugin::publishHistSnapshot()
+ {
+-  std::lock_guard<std::mutex> lock(histMutex_);
++  if (!vizConsumerActive())
++    return;
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
+   std::memcpy(histSnapshot_, histBuf_, sizeof(histBuf_));
+   histSnapshotPos_ = histPos_;
+   histSnapshotSampleCount_ = histSampleCount_;
+   histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ tresult PLUGIN_API LimiterPlugin::setActive(TBool state)
+@@ -294,8 +296,12 @@ int LimiterPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+     return 0;
+ 
+   float phase = 0.f;
++  // Seqlock read: retry while the audio thread is mid-publish.
++  for (int attempt = 0; attempt < 8; ++attempt)
+   {
+-    std::lock_guard<std::mutex> lock(histMutex_);
++    const uint32_t s0 = histSeq_.load(std::memory_order_acquire);
++    if (s0 & 1u)
++      continue; // write in progress
+     const int startPos =
+       (kHistBufSize + histSnapshotPos_ - (slots - 1) * kHistChannels) % kHistBufSize;
+     const int sps = std::max(1, histSnapshotSamplesPerSlot_);
+@@ -309,9 +315,14 @@ int LimiterPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+         gr = 1.f;
+       out[i * kHistChannels + 1] = std::clamp(gr, 1.0e-6f, 1.f);
+     }
++    const uint32_t s1 = histSeq_.load(std::memory_order_acquire);
++    if (s0 == s1)
++    {
++      out[outCount] = std::clamp(phase, 0.f, 1.f);
++      return outCount + 1;
++    }
+   }
+-  out[outCount] = std::clamp(phase, 0.f, 1.f);
+-  return outCount + 1;
++  return 0; // contended; skip this frame
+ }
+ 
+ void LimiterPlugin::configureVizBins(const char* id, int bins)
+diff --git a/dsp/limiter/source/limiter_dsp.h b/dsp/limiter/source/limiter_dsp.h
+index 1e3ac2e..ca0f908 100644
+--- a/dsp/limiter/source/limiter_dsp.h
++++ b/dsp/limiter/source/limiter_dsp.h
+@@ -13,7 +13,6 @@
+ #include <atomic>
+ #include <cstdint>
+ #include <cstring>
+-#include <mutex>
+ 
+ namespace calfNXT {
+ namespace Limiter {
+@@ -110,7 +109,10 @@ private:
+   int histPos_ = 0;
+   int histSampleCount_ = 0;
+   int histSamplesPerSlot_ = 1;
+-  std::mutex histMutex_;
++  /* Snapshot published once per block from the audio thread, read on the UI
++   * poll. Seqlock (odd/even sequence) — the audio thread never blocks; the
++   * reader retries on a torn read. */
++  std::atomic<uint32_t> histSeq_ {0};
+   float histSnapshot_[kHistBufSize] {};
+   int histSnapshotPos_ = 0;
+   int histSnapshotSampleCount_ = 0;
+diff --git a/dsp/mbcomp/source/mbcomp_dsp.cpp b/dsp/mbcomp/source/mbcomp_dsp.cpp
+index ab92793..81dc0aa 100644
+--- a/dsp/mbcomp/source/mbcomp_dsp.cpp
++++ b/dsp/mbcomp/source/mbcomp_dsp.cpp
+@@ -96,24 +96,20 @@ void MbcompPlugin::resetProcessing()
+   }
+   histSamplesPerSlot_ = 1;
+   histVisibleSlots_ = 160;
++  for (int b = 0; b < kMaxBands; ++b)
+   {
+-    std::lock_guard<std::mutex> lock(vizMutex_);
+-    for (int b = 0; b < kMaxBands; ++b)
+-    {
+-      pointInDb_[b] = -96.f;
+-      pointOutDb_[b] = -96.f;
+-    }
++    pointInDb_[b].store(-96.f, std::memory_order_relaxed);
++    pointOutDb_[b].store(-96.f, std::memory_order_relaxed);
+   }
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
++  for (int b = 0; b < kMaxBands; ++b)
+   {
+-    std::lock_guard<std::mutex> lock(histMutex_);
+-    for (int b = 0; b < kMaxBands; ++b)
+-    {
+-      std::memset(histSnapshot_[b], 0, sizeof(histSnapshot_[b]));
+-      histSnapshotPos_[b] = 0;
+-      histSnapshotSampleCount_[b] = 0;
+-    }
+-    histSnapshotSamplesPerSlot_ = 1;
++    std::memset(histSnapshot_[b], 0, sizeof(histSnapshot_[b]));
++    histSnapshotPos_[b] = 0;
++    histSnapshotSampleCount_[b] = 0;
+   }
++  histSnapshotSamplesPerSlot_ = 1;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ tresult PLUGIN_API MbcompPlugin::setActive(TBool state)
+@@ -161,7 +157,9 @@ void MbcompPlugin::histFeedSample(int band, float fullPeak, float bandPeak, floa
+ 
+ void MbcompPlugin::publishHistSnapshot()
+ {
+-  std::lock_guard<std::mutex> lock(histMutex_);
++  if (!vizConsumerActive())
++    return;
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
+   for (int b = 0; b < kMaxBands; ++b)
+   {
+     std::memcpy(histSnapshot_[b], histBuf_[b], sizeof(histBuf_[b]));
+@@ -169,6 +167,7 @@ void MbcompPlugin::publishHistSnapshot()
+     histSnapshotSampleCount_[b] = histSampleCount_[b];
+   }
+   histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ int MbcompPlugin::takeGainReductionDb(float* out, int maxOut)
+@@ -220,11 +219,10 @@ int MbcompPlugin::takeDynamicsPoint(float* out, int maxOut)
+   const int n = numBands();
+   if (maxOut < n * 2)
+     return 0;
+-  std::lock_guard<std::mutex> lock(vizMutex_);
+   for (int b = 0; b < n; ++b)
+   {
+-    out[b * 2 + 0] = pointInDb_[b];
+-    out[b * 2 + 1] = pointOutDb_[b];
++    out[b * 2 + 0] = pointInDb_[b].load(std::memory_order_relaxed);
++    out[b * 2 + 1] = pointOutDb_[b].load(std::memory_order_relaxed);
+   }
+   return n * 2;
+ }
+@@ -240,8 +238,12 @@ int MbcompPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+     return 0;
+ 
+   float phase = 0.f;
++  // Seqlock read: retry while the audio thread is mid-publish.
++  for (int attempt = 0; attempt < 8; ++attempt)
+   {
+-    std::lock_guard<std::mutex> lock(histMutex_);
++    const uint32_t s0 = histSeq_.load(std::memory_order_acquire);
++    if (s0 & 1u)
++      continue; // write in progress
+     const int sps = std::max(1, histSnapshotSamplesPerSlot_);
+     phase = static_cast<float>(histSnapshotSampleCount_[0]) / static_cast<float>(sps);
+     for (int b = 0; b < bands; ++b)
+@@ -260,9 +262,14 @@ int MbcompPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+         dst[i * kHistChannels + 2] = std::clamp(gr, 1.0e-6f, 1.f);
+       }
+     }
++    const uint32_t s1 = histSeq_.load(std::memory_order_acquire);
++    if (s0 == s1)
++    {
++      out[outCount - 1] = std::clamp(phase, 0.f, 1.f);
++      return outCount;
++    }
+   }
+-  out[outCount - 1] = std::clamp(phase, 0.f, 1.f);
+-  return outCount;
++  return 0; // contended; skip this frame
+ }
+ 
+ void MbcompPlugin::configureVizBins(const char* id, int bins)
+@@ -450,13 +457,10 @@ tresult PLUGIN_API MbcompPlugin::process(ProcessData& data)
+       lastGrDb_[b] = 0.f;
+       grMeter_[b].forceZero();
+     }
++    for (int b = 0; b < bands; ++b)
+     {
+-      std::lock_guard<std::mutex> lock(vizMutex_);
+-      for (int b = 0; b < bands; ++b)
+-      {
+-        pointInDb_[b] = -96.f;
+-        pointOutDb_[b] = -96.f;
+-      }
++      pointInDb_[b].store(-96.f, std::memory_order_relaxed);
++      pointOutDb_[b].store(-96.f, std::memory_order_relaxed);
+     }
+     publishHistSnapshot();
+     io_.end(data);
+@@ -555,13 +559,11 @@ tresult PLUGIN_API MbcompPlugin::process(ProcessData& data)
+         grMeter_[b].process(grLin);
+         lastGrDb_[b] = grDb;
+         // Curve GR (not lagged audio GR) — keeps the point on the transfer line.
+-        {
+-          const float inDb = linToDbSafe(gr_[b].lastDetectorLin());
+-          const float outDb =
+-            inDb + linToDbSafe(gr_[b].lastCurveGain()) + st.makeupDb;
+-          pointInDb_[b] = inDb;
+-          pointOutDb_[b] = outDb;
+-        }
++        const float inDb = linToDbSafe(gr_[b].lastDetectorLin());
++        const float outDb =
++          inDb + linToDbSafe(gr_[b].lastCurveGain()) + st.makeupDb;
++        pointInDb_[b].store(inDb, std::memory_order_relaxed);
++        pointOutDb_[b].store(outDb, std::memory_order_relaxed);
+       }
+       else
+       {
+@@ -571,8 +573,8 @@ tresult PLUGIN_API MbcompPlugin::process(ProcessData& data)
+         grMeter_[b].forceZero();
+         lastGrDb_[b] = 0.f;
+         const float inDb = linToDbSafe(bandPeak);
+-        pointInDb_[b] = inDb;
+-        pointOutDb_[b] = inDb;
++        pointInDb_[b].store(inDb, std::memory_order_relaxed);
++        pointOutDb_[b].store(inDb, std::memory_order_relaxed);
+       }
+ 
+       bandOutHold_[b].accumulate(0, std::max(std::fabs(bL), std::fabs(bR)));
+diff --git a/dsp/mbcomp/source/mbcomp_dsp.h b/dsp/mbcomp/source/mbcomp_dsp.h
+index 790a705..11ff902 100644
+--- a/dsp/mbcomp/source/mbcomp_dsp.h
++++ b/dsp/mbcomp/source/mbcomp_dsp.h
+@@ -10,8 +10,8 @@
+ 
+ #include "mbcomp_params.h"
+ 
++#include <atomic>
+ #include <cstring>
+-#include <mutex>
+ 
+ namespace calfNXT {
+ namespace Mbcomp {
+@@ -92,16 +92,20 @@ private:
+   Viz::LevelPeakHold bandInHold_[kMaxBands];
+   Viz::LevelPeakHold bandOutHold_[kMaxBands];
+ 
+-  std::mutex vizMutex_;
+-  float pointInDb_[kMaxBands] {};
+-  float pointOutDb_[kMaxBands] {};
++  /* Operating points written per sample on the audio thread, read on the UI
++   * poll. Atomics, not a mutex — the audio thread must never block. */
++  std::atomic<float> pointInDb_[kMaxBands] {};
++  std::atomic<float> pointOutDb_[kMaxBands] {};
+   float lastGrDb_[kMaxBands] {};
+ 
+   float histBuf_[kMaxBands][kHistBufSize] {};
+   int histPos_[kMaxBands] {};
+   int histSampleCount_[kMaxBands] {};
+   int histSamplesPerSlot_ = 1;
+-  std::mutex histMutex_;
++  /* Snapshot published once per block from the audio thread, read on the UI
++   * poll. Seqlock (odd/even sequence) — the audio thread never blocks; the
++   * reader retries on a torn read. */
++  std::atomic<uint32_t> histSeq_ {0};
+   float histSnapshot_[kMaxBands][kHistBufSize] {};
+   int histSnapshotPos_[kMaxBands] {};
+   int histSnapshotSampleCount_[kMaxBands] {};
+diff --git a/dsp/mblimiter/source/mblimiter_dsp.cpp b/dsp/mblimiter/source/mblimiter_dsp.cpp
+index c1470ea..8a518a8 100644
+--- a/dsp/mblimiter/source/mblimiter_dsp.cpp
++++ b/dsp/mblimiter/source/mblimiter_dsp.cpp
+@@ -311,16 +311,15 @@ void MblimiterPlugin::resetProcessing()
+   histSamplesPerSlot_ = 1;
+   histVisibleSlots_ = 160;
+ 
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
++  for (int b = 0; b < kMaxBands; ++b)
+   {
+-    std::lock_guard<std::mutex> lock(histMutex_);
+-    for (int b = 0; b < kMaxBands; ++b)
+-    {
+-      std::memset(histSnapshot_[b], 0, sizeof(histSnapshot_[b]));
+-      histSnapshotPos_[b] = 0;
+-      histSnapshotSampleCount_[b] = 0;
+-    }
+-    histSnapshotSamplesPerSlot_ = 1;
++    std::memset(histSnapshot_[b], 0, sizeof(histSnapshot_[b]));
++    histSnapshotPos_[b] = 0;
++    histSnapshotSampleCount_[b] = 0;
+   }
++  histSnapshotSamplesPerSlot_ = 1;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ 
+   ensureMultiBuffer();
+   applyParams(true);
+@@ -532,7 +531,9 @@ void MblimiterPlugin::histFeedSample(int band, float fullPeak, float bandPeak, f
+ 
+ void MblimiterPlugin::publishHistSnapshot()
+ {
+-  std::lock_guard<std::mutex> lock(histMutex_);
++  if (!vizConsumerActive())
++    return;
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
+   for (int b = 0; b < kMaxBands; ++b)
+   {
+     std::memcpy(histSnapshot_[b], histBuf_[b], sizeof(histBuf_[b]));
+@@ -540,6 +541,7 @@ void MblimiterPlugin::publishHistSnapshot()
+     histSnapshotSampleCount_[b] = histSampleCount_[b];
+   }
+   histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ int MblimiterPlugin::takeGainReductionDb(float* out, int maxOut)
+@@ -595,8 +597,12 @@ int MblimiterPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+     return 0;
+ 
+   float phase = 0.f;
++  // Seqlock read: retry while the audio thread is mid-publish.
++  for (int attempt = 0; attempt < 8; ++attempt)
+   {
+-    std::lock_guard<std::mutex> lock(histMutex_);
++    const uint32_t s0 = histSeq_.load(std::memory_order_acquire);
++    if (s0 & 1u)
++      continue; // write in progress
+     const int sps = std::max(1, histSnapshotSamplesPerSlot_);
+     phase = static_cast<float>(histSnapshotSampleCount_[0]) / static_cast<float>(sps);
+     for (int b = 0; b < bands; ++b)
+@@ -615,9 +621,14 @@ int MblimiterPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+         dst[i * kHistChannels + 2] = std::clamp(gr, 1.0e-6f, 1.f);
+       }
+     }
++    const uint32_t s1 = histSeq_.load(std::memory_order_acquire);
++    if (s0 == s1)
++    {
++      out[outCount - 1] = std::clamp(phase, 0.f, 1.f);
++      return outCount;
++    }
+   }
+-  out[outCount - 1] = std::clamp(phase, 0.f, 1.f);
+-  return outCount;
++  return 0; // contended; skip this frame
+ }
+ 
+ void MblimiterPlugin::configureVizBins(const char* id, int bins)
+diff --git a/dsp/mblimiter/source/mblimiter_dsp.h b/dsp/mblimiter/source/mblimiter_dsp.h
+index 0dcc122..c2b60f5 100644
+--- a/dsp/mblimiter/source/mblimiter_dsp.h
++++ b/dsp/mblimiter/source/mblimiter_dsp.h
+@@ -15,7 +15,6 @@
+ #include <atomic>
+ #include <cstdint>
+ #include <cstring>
+-#include <mutex>
+ #include <vector>
+ 
+ namespace calfNXT {
+@@ -157,7 +156,10 @@ private:
+   int histPos_[kMaxBands] {};
+   int histSampleCount_[kMaxBands] {};
+   int histSamplesPerSlot_ = 1;
+-  std::mutex histMutex_;
++  /* Snapshot published once per block from the audio thread, read on the UI
++   * poll. Seqlock (odd/even sequence) — the audio thread never blocks; the
++   * reader retries on a torn read. */
++  std::atomic<uint32_t> histSeq_ {0};
+   float histSnapshot_[kMaxBands][kHistBufSize] {};
+   int histSnapshotPos_[kMaxBands] {};
+   int histSnapshotSampleCount_[kMaxBands] {};
+diff --git a/dsp/octaver/source/octaver_dsp.cpp b/dsp/octaver/source/octaver_dsp.cpp
+index ce4dac3..b359922 100644
+--- a/dsp/octaver/source/octaver_dsp.cpp
++++ b/dsp/octaver/source/octaver_dsp.cpp
+@@ -150,12 +150,11 @@ void OctaverPlugin::resetProcessing()
+   std::memset(histBuf_, 0, sizeof(histBuf_));
+   histPos_ = 0;
+   histSampleCount_ = 0;
+-  {
+-    std::lock_guard<std::mutex> lock(histMutex_);
+-    std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
+-    histSnapshotPos_ = 0;
+-    histSnapshotSampleCount_ = 0;
+-  }
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
++  std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
++  histSnapshotPos_ = 0;
++  histSnapshotSampleCount_ = 0;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+   const BlockState st = makeBlockState();
+   const float sr = static_cast<float>(sampleRate_ > 0.0 ? sampleRate_ : 44100.0);
+   hopSize_ = std::max(64, static_cast<int>(sr * 0.008));
+@@ -279,17 +278,16 @@ void OctaverPlugin::histFeed(float inMidi, float layerBits, float conf, float fl
+   if (histSampleCount_ >= histSamplesPerSlot_)
+   {
+     histSampleCount_ = 0;
+-    {
+-      std::lock_guard<std::mutex> lock(histMutex_);
+-      histSnapshot_[pos + 0] = inMidi;
+-      histSnapshot_[pos + 1] = layerBits;
+-      histSnapshot_[pos + 2] = conf;
+-      histSnapshot_[pos + 3] = flags;
+-      histSnapshot_[pos + 4] = 0.f;
+-      histSnapshotPos_ = pos;
+-      histSnapshotSampleCount_ = 0;
+-      histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
+-    }
++    histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
++    histSnapshot_[pos + 0] = inMidi;
++    histSnapshot_[pos + 1] = layerBits;
++    histSnapshot_[pos + 2] = conf;
++    histSnapshot_[pos + 3] = flags;
++    histSnapshot_[pos + 4] = 0.f;
++    histSnapshotPos_ = pos;
++    histSnapshotSampleCount_ = 0;
++    histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
++    histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+     histPos_ = (histPos_ + kHistChannels) % kHistBufSize;
+     histBuf_[histPos_ + 0] = inMidi;
+     histBuf_[histPos_ + 1] = layerBits;
+@@ -301,11 +299,14 @@ void OctaverPlugin::histFeed(float inMidi, float layerBits, float conf, float fl
+ 
+ void OctaverPlugin::publishHistSnapshot()
+ {
+-  std::lock_guard<std::mutex> lock(histMutex_);
++  if (!vizConsumerActive())
++    return;
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
+   std::memcpy(histSnapshot_, histBuf_, sizeof(histBuf_));
+   histSnapshotPos_ = histPos_;
+   histSnapshotSampleCount_ = histSampleCount_;
+   histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ int OctaverPlugin::takePitchHistory(float* out, int maxOut)
+@@ -316,8 +317,12 @@ int OctaverPlugin::takePitchHistory(float* out, int maxOut)
+     return 0;
+ 
+   float phase = 0.f;
++  // Seqlock read: retry while the audio thread is mid-publish.
++  for (int attempt = 0; attempt < 8; ++attempt)
+   {
+-    std::lock_guard<std::mutex> lock(histMutex_);
++    const uint32_t s0 = histSeq_.load(std::memory_order_acquire);
++    if (s0 & 1u)
++      continue; // write in progress
+     const int startPos =
+       (kHistBufSize + histSnapshotPos_ - (slots - 1) * kHistChannels) % kHistBufSize;
+     const int sps = std::max(1, histSnapshotSamplesPerSlot_);
+@@ -331,9 +336,14 @@ int OctaverPlugin::takePitchHistory(float* out, int maxOut)
+       out[i * kHistChannels + 3] = histSnapshot_[srcIdx + 3];
+       out[i * kHistChannels + 4] = histSnapshot_[srcIdx + 4];
+     }
++    const uint32_t s1 = histSeq_.load(std::memory_order_acquire);
++    if (s0 == s1)
++    {
++      out[outCount] = std::clamp(phase, 0.f, 1.f);
++      return outCount + 1;
++    }
+   }
+-  out[outCount] = std::clamp(phase, 0.f, 1.f);
+-  return outCount + 1;
++  return 0; // contended; skip this frame
+ }
+ 
+ void OctaverPlugin::configureVizBins(const char* id, int bins)
+diff --git a/dsp/octaver/source/octaver_dsp.h b/dsp/octaver/source/octaver_dsp.h
+index 10745ac..95a6f17 100644
+--- a/dsp/octaver/source/octaver_dsp.h
++++ b/dsp/octaver/source/octaver_dsp.h
+@@ -17,7 +17,6 @@
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstring>
+-#include <mutex>
+ 
+ namespace calfNXT {
+ namespace Octaver {
+@@ -176,7 +175,10 @@ private:
+   int diagM1N_ = 0;
+   FILE* diagFile_ = nullptr;
+ 
+-  std::mutex histMutex_;
++  /* Snapshot published per completed slot / per block from the audio thread,
++   * read on the UI poll. Seqlock (odd/even sequence) — the audio thread never
++   * blocks; the reader retries on a torn read. */
++  std::atomic<uint32_t> histSeq_ {0};
+   float histBuf_[kHistBufSize] {};
+   int histPos_ = 0;
+   int histSampleCount_ = 0;
+diff --git a/dsp/transients/source/transients_dsp.cpp b/dsp/transients/source/transients_dsp.cpp
+index 7cbf12b..df99668 100644
+--- a/dsp/transients/source/transients_dsp.cpp
++++ b/dsp/transients/source/transients_dsp.cpp
+@@ -92,13 +92,12 @@ void TransientsPlugin::resetProcessing()
+   envSlotMaxEnv_ = 0.f;
+   envSlotMaxAtt_ = 0.f;
+   envSlotMaxRel_ = 0.f;
+-  {
+-    std::lock_guard<std::mutex> lock(envMutex_);
+-    std::memset(envSnapshot_, 0, sizeof(envSnapshot_));
+-    envSnapshotPos_ = 0;
+-    envSnapshotSampleCount_ = 0;
+-    envSnapshotSamplesPerSlot_ = 1;
+-  }
++  envSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
++  std::memset(envSnapshot_, 0, sizeof(envSnapshot_));
++  envSnapshotPos_ = 0;
++  envSnapshotSampleCount_ = 0;
++  envSnapshotSamplesPerSlot_ = 1;
++  envSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ tresult PLUGIN_API TransientsPlugin::setActive(TBool state)
+@@ -210,11 +209,14 @@ void TransientsPlugin::envBufFeedSample(float dryPeak, float filteredPeak, float
+ 
+ void TransientsPlugin::publishEnvSnapshot()
+ {
+-  std::lock_guard<std::mutex> lock(envMutex_);
++  if (!vizConsumerActive())
++    return;
++  envSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
+   std::memcpy(envSnapshot_, envBuf_, sizeof(envBuf_));
+   envSnapshotPos_ = envPos_;
+   envSnapshotSampleCount_ = envSampleCount_;
+   envSnapshotSamplesPerSlot_ = envSamplesPerSlot_;
++  envSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ void TransientsPlugin::processSample(const BlockState& state, float& L, float& R)
+@@ -320,8 +322,12 @@ int TransientsPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+     return 0;
+ 
+   float phase = 0.f;
++  // Seqlock read: retry while the audio thread is mid-publish.
++  for (int attempt = 0; attempt < 8; ++attempt)
+   {
+-    std::lock_guard<std::mutex> lock(envMutex_);
++    const uint32_t s0 = envSeq_.load(std::memory_order_acquire);
++    if (s0 & 1u)
++      continue; // write in progress
+     const int startPos =
+       (kEnvBufSize + envSnapshotPos_ - (slots - 1) * kEnvChannels) % kEnvBufSize;
+     const int sps = std::max(1, envSnapshotSamplesPerSlot_);
+@@ -332,9 +338,14 @@ int TransientsPlugin::takeEnvelopeDisplay(float* out, int maxOut)
+       for (int c = 0; c < kEnvChannels; ++c)
+         out[i * kEnvChannels + c] = std::fabs(envSnapshot_[srcIdx + c]);
+     }
++    const uint32_t s1 = envSeq_.load(std::memory_order_acquire);
++    if (s0 == s1)
++    {
++      out[outCount] = std::clamp(phase, 0.f, 1.f);
++      return outCount + 1;
++    }
+   }
+-  out[outCount] = std::clamp(phase, 0.f, 1.f);
+-  return outCount + 1;
++  return 0; // contended; skip this frame
+ }
+ 
+ void TransientsPlugin::configureVizBins(const char* id, int bins)
+diff --git a/dsp/transients/source/transients_dsp.h b/dsp/transients/source/transients_dsp.h
+index 74ec014..6b6c79b 100644
+--- a/dsp/transients/source/transients_dsp.h
++++ b/dsp/transients/source/transients_dsp.h
+@@ -9,8 +9,8 @@
+ 
+ #include "transients_params.h"
+ 
++#include <atomic>
+ #include <cstring>
+-#include <mutex>
+ 
+ namespace calfNXT {
+ namespace Transients {
+@@ -98,7 +98,10 @@ private:
+   float envSlotMaxEnv_ = 0.f;
+   float envSlotMaxAtt_ = 0.f;
+   float envSlotMaxRel_ = 0.f;
+-  std::mutex envMutex_;
++  /* Snapshot published once per block from the audio thread, read on the UI
++   * poll. Seqlock (odd/even sequence) — the audio thread never blocks; the
++   * reader retries on a torn read. */
++  std::atomic<uint32_t> envSeq_ {0};
+   float envSnapshot_[kEnvBufSize] {};
+   int envSnapshotPos_ = 0;
+   int envSnapshotSampleCount_ = 0;
+diff --git a/dsp/tuner/source/tuner_dsp.cpp b/dsp/tuner/source/tuner_dsp.cpp
+index a367f8c..eb38d1c 100644
+--- a/dsp/tuner/source/tuner_dsp.cpp
++++ b/dsp/tuner/source/tuner_dsp.cpp
+@@ -119,12 +119,11 @@ void TunerPlugin::resetProcessing()
+   std::memset(histBuf_, 0, sizeof(histBuf_));
+   histPos_ = 0;
+   histSampleCount_ = 0;
+-  {
+-    std::lock_guard<std::mutex> lock(histMutex_);
+-    std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
+-    histSnapshotPos_ = 0;
+-    histSnapshotSampleCount_ = 0;
+-  }
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
++  std::memset(histSnapshot_, 0, sizeof(histSnapshot_));
++  histSnapshotPos_ = 0;
++  histSnapshotSampleCount_ = 0;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+   const BlockState st = makeBlockState();
+   const float sr = static_cast<float>(sampleRate_ > 0.0 ? sampleRate_ : 44100.0);
+   hopSize_ = std::max(64, static_cast<int>(sr * 0.008));
+@@ -214,17 +213,16 @@ void TunerPlugin::histFeed(float inMidi, float tgtMidi, float conf, float flags,
+   if (histSampleCount_ >= histSamplesPerSlot_)
+   {
+     histSampleCount_ = 0;
+-    {
+-      std::lock_guard<std::mutex> lock(histMutex_);
+-      histSnapshot_[pos + 0] = inMidi;
+-      histSnapshot_[pos + 1] = tgtMidi;
+-      histSnapshot_[pos + 2] = conf;
+-      histSnapshot_[pos + 3] = flags;
+-      histSnapshot_[pos + 4] = corrCents;
+-      histSnapshotPos_ = pos;
+-      histSnapshotSampleCount_ = 0;
+-      histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
+-    }
++    histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
++    histSnapshot_[pos + 0] = inMidi;
++    histSnapshot_[pos + 1] = tgtMidi;
++    histSnapshot_[pos + 2] = conf;
++    histSnapshot_[pos + 3] = flags;
++    histSnapshot_[pos + 4] = corrCents;
++    histSnapshotPos_ = pos;
++    histSnapshotSampleCount_ = 0;
++    histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
++    histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+     histPos_ = (histPos_ + kHistChannels) % kHistBufSize;
+     histBuf_[histPos_ + 0] = inMidi;
+     histBuf_[histPos_ + 1] = tgtMidi;
+@@ -237,11 +235,14 @@ void TunerPlugin::histFeed(float inMidi, float tgtMidi, float conf, float flags,
+ void TunerPlugin::publishHistSnapshot()
+ {
+   // Kept for reset / full sync — UI path uses per-slot publish in histFeed.
+-  std::lock_guard<std::mutex> lock(histMutex_);
++  if (!vizConsumerActive())
++    return;
++  histSeq_.fetch_add(1, std::memory_order_release); // odd: write in progress
+   std::memcpy(histSnapshot_, histBuf_, sizeof(histBuf_));
+   histSnapshotPos_ = histPos_;
+   histSnapshotSampleCount_ = histSampleCount_;
+   histSnapshotSamplesPerSlot_ = histSamplesPerSlot_;
++  histSeq_.fetch_add(1, std::memory_order_release); // even: stable
+ }
+ 
+ int TunerPlugin::takePitchHistory(float* out, int maxOut)
+@@ -252,8 +253,12 @@ int TunerPlugin::takePitchHistory(float* out, int maxOut)
+     return 0;
+ 
+   float phase = 0.f;
++  // Seqlock read: retry while the audio thread is mid-publish.
++  for (int attempt = 0; attempt < 8; ++attempt)
+   {
+-    std::lock_guard<std::mutex> lock(histMutex_);
++    const uint32_t s0 = histSeq_.load(std::memory_order_acquire);
++    if (s0 & 1u)
++      continue; // write in progress
+     const int startPos =
+       (kHistBufSize + histSnapshotPos_ - (slots - 1) * kHistChannels) % kHistBufSize;
+     const int sps = std::max(1, histSnapshotSamplesPerSlot_);
+@@ -267,9 +272,14 @@ int TunerPlugin::takePitchHistory(float* out, int maxOut)
+       out[i * kHistChannels + 3] = histSnapshot_[srcIdx + 3];
+       out[i * kHistChannels + 4] = histSnapshot_[srcIdx + 4];
+     }
++    const uint32_t s1 = histSeq_.load(std::memory_order_acquire);
++    if (s0 == s1)
++    {
++      out[outCount] = std::clamp(phase, 0.f, 1.f);
++      return outCount + 1;
++    }
+   }
+-  out[outCount] = std::clamp(phase, 0.f, 1.f);
+-  return outCount + 1;
++  return 0; // contended; skip this frame
+ }
+ 
+ void TunerPlugin::configureVizBins(const char* id, int bins)
+diff --git a/dsp/tuner/source/tuner_dsp.h b/dsp/tuner/source/tuner_dsp.h
+index 724d5ef..71d1e0a 100644
+--- a/dsp/tuner/source/tuner_dsp.h
++++ b/dsp/tuner/source/tuner_dsp.h
+@@ -13,7 +13,6 @@
+ #include <atomic>
+ #include <cstdint>
+ #include <cstring>
+-#include <mutex>
+ 
+ namespace calfNXT {
+ namespace Tuner {
+@@ -120,7 +119,10 @@ private:
+   int leapHold_ = 0;
+   int dryHops_ = 0;
+ 
+-  std::mutex histMutex_;
++  /* Snapshot published per completed slot / per block from the audio thread,
++   * read on the UI poll. Seqlock (odd/even sequence) — the audio thread never
++   * blocks; the reader retries on a torn read. */
++  std::atomic<uint32_t> histSeq_ {0};
+   float histBuf_[kHistBufSize] {};
+   int histPos_ = 0;
+   int histSampleCount_ = 0;
+-- 
+2.54.0 (Apple Git-157)
+

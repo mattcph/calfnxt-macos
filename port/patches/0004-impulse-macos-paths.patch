@@ -1,0 +1,53 @@
+From cfc174860635fc3dd550414444c9276ea73a24f9 Mon Sep 17 00:00:00 2001
+From: Matt Hardy <matt@deuso.de>
+Date: Fri, 18 Sep 2026 13:48:29 +0200
+Subject: [PATCH] impulse: macOS library config dir + cross-platform session
+ root fallback
+
+configDir() uses ~/Library/Application Support/calfNXT on macOS
+(~/.config/calfnxt elsewhere). When a session restores a library root
+that does not exist on this machine (e.g. a Linux path), fall back to
+the last locally used library so the IR tree still populates.
+---
+ dsp/impulse/source/impulse_dsp.cpp | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/dsp/impulse/source/impulse_dsp.cpp b/dsp/impulse/source/impulse_dsp.cpp
+index 116e66d..39bd5d9 100644
+--- a/dsp/impulse/source/impulse_dsp.cpp
++++ b/dsp/impulse/source/impulse_dsp.cpp
+@@ -132,7 +132,11 @@ std::string configDir()
+   const char* home = std::getenv("HOME");
+   if (!home || !home[0])
+     return {};
++#ifdef __APPLE__
++  return std::string(home) + "/Library/Application Support/calfNXT";
++#else
+   return std::string(home) + "/.config/calfnxt";
++#endif
+ }
+ 
+ /** Wet feed only. Dry stays the original stereo. 0=Stereo 1=L 2=R 3=L+R. */
+@@ -1009,7 +1013,19 @@ tresult PLUGIN_API ImpulsePlugin::setState(IBStream* state)
+     }
+   }
+   if (!root.empty())
++  {
++    // Sessions travel across platforms: a library root stored on another OS
++    // (e.g. a Linux path in a macOS session) may not exist here. Fall back
++    // to the last library used on this machine so the tree still populates.
++    struct stat st;
++    if (::stat(root.c_str(), &st) != 0)
++    {
++      const std::string last = lastLibraryPath();
++      if (!last.empty())
++        root = last;
++    }
+     queueJob(JobKind::Scan, root);
++  }
+   if (haveIr_)
+     queueJob(JobKind::Rebuild);
+ 
+-- 
+2.54.0 (Apple Git-157)
+

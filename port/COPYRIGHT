@@ -1,0 +1,54 @@
+calfNXT — macOS VST3 port
+=========================
+
+Port copyright (new code in this tree)
+--------------------------------------
+
+Copyright (C) 2026 Matt Hardy
+
+The macOS port — the WKWebView editor, the ParamBridge integration, the
+array-telemetry seam glue, the React/AWML glue, the codegen additions, the
+CMake/Makefile build, and this documentation — is free software under the GNU
+General Public License, version 3 or later (GPL-3.0-or-later).
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+You should have received a copy along with this program; if not, see
+<https://www.gnu.org/licenses/>.
+
+
+Upstream calfNXT (retained notices)
+-----------------------------------
+
+Copyright (C) 2026 Markus Schmidt <schmidt@boomshop.net>
+and the calfNXT contributors.
+
+calfNXT is free software under the GNU General Public License, version 3 or
+later. The DSP algorithms, the parameter model (`*.plugin.json` descriptors),
+the React + AUX interface sources, and the upstream codegen are upstream's,
+used here under the GPL. See the upstream `COPYRIGHT` and `LICENSE` in the
+`calfnxt-macos/calfnxt` submodule for the full upstream notices.
+
+The full text of the GNU General Public License version 3 is in the upstream
+`LICENSE` file.
+
+
+Third-party and related works
+-----------------------------
+
+Calf Studio Gear
+  Portions of the DSP are derived from Calf Studio Gear
+  (https://calf-studio-gear.org / https://github.com/calf-studio-gear/calf),
+  originally under the GNU Lesser General Public License v2.1. The LGPL
+  permits combining and distributing such code under the GNU GPL.
+
+AUX widgets / AWML
+  UI building blocks include GPL-licensed `@deutschesoft/aux-widgets` and AWML
+  (DeusO GmbH). The React glue in `ui/react-aux/` is a GPL-3.0-or-later
+  reimplementation by Matt Hardy; the GPL-2.0-only `use-aux-widgets` package
+  is not shipped in this port.
+
+Steinberg VST3 SDK
+  The VST3 SDK is used under the Steinberg VST3 License (MIT-style for the
+  SDK source). See the SDK's own license in `vst3sdk/`.

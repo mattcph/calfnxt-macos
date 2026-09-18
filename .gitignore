@@ -1,0 +1,16 @@
+# Local release credentials (never commit)
+.env.local
+
+# Release artifacts (signed / stapled bundles)
+/dist/
+
+# macOS
+.DS_Store
+*.dSYM
+
+# Node (UI builds run inside the calfnxt submodule; defensive for port/ui)
+node_modules/
+
+# Patch workflow leftovers (git apply / patch rejects)
+*.orig
+*.rej

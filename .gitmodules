@@ -1,0 +1,10 @@
+[submodule "calfnxt"]
+	path = calfnxt
+	url = https://github.com/boomshop/calfnxt.git
+	# Hide in-submodule dirt (node_modules, ui/dist, codegen output from the
+	# build); pointer bumps from `make sync-upstream` still show in git status.
+	ignore = dirty
+[submodule "vst3sdk"]
+	path = vst3sdk
+	url = https://github.com/steinbergmedia/vst3sdk.git
+	ignore = dirty
