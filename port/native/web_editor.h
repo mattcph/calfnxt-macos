@@ -66,6 +66,12 @@ public:
   /** UI→host message from the WKScriptMessage handler (JSON text). */
   void onScriptMessage(const char* json);
 
+  /** Physical mouse gesture boundaries in the WebView (main thread).
+      Brackets {t:"set"} streams with beginEdit/endEdit so the host does
+      not have to synthesize gesture boundaries. */
+  void gestureMouseDown();
+  void gestureMouseUp();
+
 protected:
   virtual void onPageReady();
   virtual bool onWebMessage(const char* json);
@@ -90,6 +96,10 @@ private:
   bool listeningParams_ = false;
   bool suppressParamPush_ = false;
   bool pageReady_ = false;
+  /** Mouse is down in the WebView; sets during this window are bracketed. */
+  bool gestureMouseDown_ = false;
+  /** Params whose beginEdit was issued within the current mouse gesture. */
+  std::vector<Steinberg::Vst::ParamID> gestureParams_;
   /** Editor visible (attach + occlusion). Gates the viz drain. */
   bool editorVisible_ = false;
 

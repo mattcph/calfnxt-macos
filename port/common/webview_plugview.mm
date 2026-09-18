@@ -102,7 +102,16 @@ static void AuxDebugLogTo (NSString* path, NSString* line, BOOL reset)
 {
 	if (!AuxDebugEnabled () || !path.length)
 		return;
-	NSString* out = [line stringByAppendingString:@"\n"];
+	static NSDateFormatter* ts = nil;
+	static dispatch_once_t once;
+	dispatch_once (&once, ^{
+		ts = [[NSDateFormatter alloc] init];
+		ts.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+		ts.dateFormat = @"HH:mm:ss.SSS";
+	});
+	NSString* stamped =
+	    [NSString stringWithFormat:@"[%@] %@", [ts stringFromDate:[NSDate date]], line];
+	NSString* out = [stamped stringByAppendingString:@"\n"];
 	NSData* data = [out dataUsingEncoding:NSUTF8StringEncoding];
 	if (reset)
 	{
@@ -118,6 +127,67 @@ static void AuxDebugLogTo (NSString* path, NSString* line, BOOL reset)
 	@try { [fh seekToEndOfFile]; [fh writeData:data]; } @catch (...) {}
 	[fh closeFile];
 }
+
+/* First click on a non-key editor window activates the window AND reaches the
+ * widget; the default NSView policy would eat that click for activation. */
+@interface AuxWebView : WKWebView
+@property (nonatomic, weak) AuxWebViewState* auxState;
+@property (nonatomic, assign) NSInteger auxSavedLevel;
+@property (nonatomic, assign) BOOL auxPinned;
+@end
+
+@implementation AuxWebView
+
+- (BOOL)acceptsFirstMouse:(NSEvent*)event
+{
+	(void)event;
+	return YES;
+}
+
+- (void)auxPinWindow
+{
+	NSWindow* w = self.window;
+	if (!w || self.auxPinned)
+		return;
+	self.auxSavedLevel = w.level;
+	self.auxPinned = YES;
+	/* Live orderFronts the last-opened editor during an open parameter
+	   gesture without making it key. Sibling plug-in windows sit at
+	   NSFloatingWindowLevel; pin above them for the drag. */
+	w.level = NSModalPanelWindowLevel;
+}
+
+- (void)auxUnpinWindow
+{
+	NSWindow* w = self.window;
+	if (!w || !self.auxPinned)
+		return;
+	w.level = self.auxSavedLevel;
+	self.auxPinned = NO;
+	[w orderFront:self];
+}
+
+/* Live makes a content-clicked editor window key without ordering it front
+ * (title-bar clicks raise through Live's own path), so the clicked editor
+ * stays behind other plug-in windows. Raise it on content click. */
+- (void)mouseDown:(NSEvent*)event
+{
+	[self.window orderFront:self];
+	[self auxPinWindow];
+	if (self.auxState.plugView)
+		reinterpret_cast<Steinberg::Vst::WebViewPlugView*> (self.auxState.plugView)->gesture (true);
+	[super mouseDown:event];
+}
+
+- (void)mouseUp:(NSEvent*)event
+{
+	[self auxUnpinWindow];
+	if (self.auxState.plugView)
+		reinterpret_cast<Steinberg::Vst::WebViewPlugView*> (self.auxState.plugView)->gesture (false);
+	[super mouseUp:event];
+}
+
+@end
 
 @implementation AuxWebViewState
 
@@ -244,7 +314,9 @@ static void AuxDebugLogTo (NSString* path, NSString* line, BOOL reset)
 	{
 		NSString* m = dict[@"msg"];
 		if ([m isKindOfClass:[NSString class]])
+		{
 			AuxDebugLogTo (self.debugLogPath, [@"[ui] " stringByAppendingString:m], NO);
+		}
 		return;
 	}
 
@@ -554,7 +626,8 @@ void WebViewPlugView::attachedToParent ()
 		NSRect frame = parent.bounds;
 		if (frame.size.width < 1 || frame.size.height < 1)
 			frame = NSMakeRect (0, 0, rect.getWidth (), rect.getHeight ());
-		WKWebView* webView = [[WKWebView alloc] initWithFrame:frame configuration:wkConfig];
+		AuxWebView* webView = [[AuxWebView alloc] initWithFrame:frame configuration:wkConfig];
+		webView.auxState = state;
 		webView.navigationDelegate = state;
 		webView.UIDelegate = state;
 		webView.allowsMagnification = NO;
@@ -617,6 +690,9 @@ void WebViewPlugView::removedFromParent ()
 	{
 		AuxWebViewState* state = (__bridge_transfer AuxWebViewState*)impl;
 		impl = nullptr;
+
+		if ([state.webView isKindOfClass:[AuxWebView class]])
+			[(AuxWebView*)state.webView auxUnpinWindow];
 
 		[[NSNotificationCenter defaultCenter] removeObserver:state
 		                                                name:NSWindowDidChangeOcclusionStateNotification

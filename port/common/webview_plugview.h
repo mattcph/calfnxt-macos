@@ -68,6 +68,17 @@ public:
 		if (rawMessageHandler)
 			rawMessageHandler (json);
 	}
+	/** Product hook: physical mouse gesture boundaries in the WebView
+	    (main thread); used to bracket host edit gestures. */
+	void setGestureHandler (std::function<void (bool down)> handler)
+	{
+		gestureHandler = std::move (handler);
+	}
+	void gesture (bool down)
+	{
+		if (gestureHandler)
+			gestureHandler (down);
+	}
 	/** Product hook: page navigation finished (calfNXT's page-ready signal). */
 	void setNavigationFinishedHandler (std::function<void ()> handler)
 	{
@@ -93,6 +104,7 @@ private:
 	bool hostFillRequested {false};
 	bool occluded {false};
 	std::function<void (const std::string&)> rawMessageHandler;
+	std::function<void (bool)> gestureHandler;
 	std::function<void ()> navigationFinishedHandler;
 };//------------------------------------------------------------------------
 } // namespace Vst

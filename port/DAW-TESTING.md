@@ -85,10 +85,3 @@ Inspect Element) and the per-tick viz dump (`window.__calfnxtDumpViz()`).
   patch 0004 lands upstream.
 - Mono bus arrangements are rejected by upstream `setBusArrangements`; the
   plugin suggests stereo.
-
-## Known host issues
-
-- **Ableton Live ≤ 12.3** has a confirmed plug-in window z-order bug on
-  macOS: clicking one plug-in window may raise a different one, and new
-  windows can open behind existing ones. Fixed in Live 12.4; update if you
-  hit it.

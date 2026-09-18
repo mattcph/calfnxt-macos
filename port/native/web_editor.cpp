@@ -197,6 +197,12 @@ tresult PLUGIN_API WebEditor::attached(void* parent, FIDString type)
   // load completion is the port's ready signal (upstream: {t:"_ready"}).
   view->setRawMessageHandler([this](const std::string& json) { onScriptMessage(json.c_str()); });
   view->setNavigationFinishedHandler([this]() { onPageReady(); });
+  view->setGestureHandler([this](bool down) {
+    if (down)
+      gestureMouseDown();
+    else
+      gestureMouseUp();
+  });
   view->attached(parent, type);
 
   attachParamListeners();
@@ -211,6 +217,7 @@ tresult PLUGIN_API WebEditor::removed()
   editorVisible_ = false;
   if (vizSource_)
     vizSource_->setVizConsumerActive(false);
+  gestureMouseUp();
   detachParamListeners();
   if (plugView_)
   {
@@ -409,11 +416,16 @@ bool WebEditor::onWebMessage(const char* json)
   if (jsonHasType(json, "begin"))
   {
     controller_->beginEdit(id);
+    if (gestureMouseDown_
+        && std::find(gestureParams_.begin(), gestureParams_.end(), id) == gestureParams_.end())
+      gestureParams_.push_back(id);
     return true;
   }
   if (jsonHasType(json, "end"))
   {
     controller_->endEdit(id);
+    gestureParams_.erase(std::remove(gestureParams_.begin(), gestureParams_.end(), id),
+                         gestureParams_.end());
     return true;
   }
   if (jsonHasType(json, "set"))
@@ -423,6 +435,12 @@ bool WebEditor::onWebMessage(const char* json)
       return false;
     if (auto* p = controller_->getParameterObject(id))
     {
+      if (gestureMouseDown_
+          && std::find(gestureParams_.begin(), gestureParams_.end(), id) == gestureParams_.end())
+      {
+        controller_->beginEdit(id);
+        gestureParams_.push_back(id);
+      }
       const double norm = p->toNormalized(plain);
       suppressParamPush_ = true;
       controller_->setParamNormalized(id, norm);
@@ -439,6 +457,21 @@ bool WebEditor::onWebMessage(const char* json)
 void WebEditor::onScriptMessage(const char* json)
 {
   onWebMessage(json);
+}
+
+void WebEditor::gestureMouseDown()
+{
+  // Close anything left open by a previous gesture that never saw mouseUp.
+  gestureMouseUp();
+  gestureMouseDown_ = true;
+}
+
+void WebEditor::gestureMouseUp()
+{
+  gestureMouseDown_ = false;
+  for (auto id : gestureParams_)
+    controller_->endEdit(id);
+  gestureParams_.clear();
 }
 
 //------------------------------------------------------------------------
