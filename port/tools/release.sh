@@ -179,7 +179,7 @@ if [ "$NOTARIZE" = 1 ]; then
   suite_zip="$stage_dir/calfNXT-macOS-$VERSION.zip"
   echo "[calfNXT] notarytool submit (profile: $NOTARY_PROFILE) — ${#BUNDLES[@]} bundles ..."
   # ditto takes one source: stage the bundles, then zip the folder.
-  inner="calfNXT-$VERSION"
+  inner="calfNXT-MacOS-$VERSION"
   mkdir -p "$stage_dir/$inner"
   for bundle in "${BUNDLES[@]}"; do
     cp -R "$bundle" "$stage_dir/$inner/"
@@ -223,10 +223,10 @@ for bundle in "${BUNDLES[@]}"; do
 done
 
 # Suite zip for a manual GitHub Release (contains the stapled bundles).
-# Unpacks as calfNXT-<version>/, not a dump of 25 bundles in cwd.
+# Unpacks as calfNXT-MacOS-<version>/, not a dump of 25 bundles in cwd.
 rm -f "$DIST_ZIP"
 zip_stage="$(mktemp -d /tmp/calfnxt-dist.XXXXXX)"
-inner="calfNXT-$VERSION"
+inner="calfNXT-MacOS-$VERSION"
 mkdir -p "$zip_stage/$inner"
 for bundle in "${BUNDLES[@]}"; do
   cp -R "$DIST_VERSION_DIR/$(basename "$bundle")" "$zip_stage/$inner/"
