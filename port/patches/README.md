@@ -24,7 +24,7 @@ Each `NNNN-<slug>.patch` is one upstream PR. Keep them small and independent.
 
 ## Submitting (PR artifacts)
 
-All four apply cleanly to `v2.3.0` (verified with `git apply --check`).
+All four apply cleanly to `v2.3.1` (verified with `git apply --check`).
 Submit to Markus as GitHub PRs from a fork of `github.com/boomshop/calfnxt`,
 or send the patch files directly (`git am` applies them, authorship
 preserved). Suggested PRs:

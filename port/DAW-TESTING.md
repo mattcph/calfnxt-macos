@@ -78,7 +78,7 @@ Inspect Element) and the per-tick viz dump (`window.__calfnxtDumpViz()`).
 
 ## Known limitations (by design, this release)
 
-- Shipped binaries are **pristine upstream v2.3.0**: the RT-safety fixes live
+- Shipped binaries are **pristine upstream v2.3.1**: the RT-safety fixes live
   in `port/patches/` (0001-0003) until Markus merges them. Audio-thread locks
   remain in the shipped build.
 - Impulse's default library dir is `~/.config/calfnxt` (Linux-style) until
