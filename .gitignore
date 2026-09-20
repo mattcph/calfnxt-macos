@@ -3,6 +3,7 @@
 
 # Release artifacts (signed / stapled bundles)
 /dist/
+/Releases/
 
 # macOS
 .DS_Store
