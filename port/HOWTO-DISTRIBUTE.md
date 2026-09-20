@@ -17,16 +17,16 @@ signing + notarization + stapling.
 3. Store notary credentials **once** in the keychain:
 
 ```bash
-# Profile name should match NOTARY_PROFILE in .env.local (default: com.calfNXT)
-xcrun notarytool store-credentials "com.calfNXT" \
+# Profile name should match NOTARY_PROFILE in .env.local
+xcrun notarytool store-credentials "com.yourNotaryProfile" \
   --apple-id "<apple-id>" \
   --team-id "<TEAMID>" \
   --password "<app-specific-password>"
 ```
 
-If you already stored a profile for another product line (e.g. `com.auxVST`),
-you can reuse it; the profile only holds your Apple ID / team / password:
-`NOTARY_PROFILE=com.auxVST` in `.env.local`.
+The profile is just a keychain name for your Apple ID / team / password. Any
+name works, and you can reuse one profile across product lines (calfNXT,
+auxVST, …) — set `NOTARY_PROFILE=com.yourNotaryProfile` in `.env.local`.
 
 1. Confirm the signing identity:
 
@@ -51,25 +51,32 @@ make -C port install
 Copy `[.env.local.example](../.env.local.example)` to repo-root `.env.local` and fill in your Developer ID values (gitignored). Then when in repo-root:
 
 ```bash
-make -C port release                      # sign all 25 → dist/ + install
-make -C port release PLUGIN=equalizer     # one plugin
-make -C port release NOTARIZE=1           # sign + notarize + staple all 25
+make -C port release VERSION=2.3.1.1                # clean rebuild + sign all 25
+make -C port release VERSION=2.3.1.1 NOTARIZE=1     # + notarize + staple all 25
 ```
+
+The port version (e.g. `2.3.1.1`) is **required**. It is baked into the
+bundles (`CFBundleShortVersionString`) and used for the local backup:
+
+```text
+Releases/2.3.1.1/<Name>.vst3            # versioned backup (repo root, gitignored)
+Releases/calfNXT-macOS-2.3.1.1.zip      # ready to attach to a GitHub Release
+~/Library/Audio/Plug-Ins/VST3/<Name>.vst3  # installed copy
+```
+
+(`dist/` stays the scratch/test area; `Releases/` keeps every version beside
+the previous ones, like auxVST.)
+
+`tools/release.sh` always wipes `port/build/VST3/Release` and the in-tree
+Xcode object files before rebuilding, so a notarized run can never staple
+stale products from an earlier submodule.
 
 Or call the script directly with Make-style overrides:
 
 ```bash
-port/tools/release.sh equalizer --notarize \
+port/tools/release.sh 2.3.1.1 --notarize \
   CODE_SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" \
-  NOTARY_PROFILE=com.calfNXT
-```
-
-Output:
-
-```text
-port/build/VST3/Release/<Name>.vst3        # build tree (signed in place)
-dist/<Name>.vst3                           # shipping copy (gitignored)
-~/Library/Audio/Plug-Ins/VST3/<Name>.vst3  # installed copy
+  NOTARY_PROFILE=com.yourNotaryProfile
 ```
 
 
@@ -77,21 +84,25 @@ dist/<Name>.vst3                           # shipping copy (gitignored)
 ## Verify the signature
 
 ```bash
-BUNDLE=dist/calfNXTEqualizer.vst3
+BUNDLE=Releases/2.3.1.1/calfNXTEqualizer.vst3
 codesign --verify --deep --strict --verbose=2 "$BUNDLE"
 codesign -dv --verbose=4 "$BUNDLE" 2>&1 | grep -E "Authority|TeamIdentifier"
 ```
 
 Confirm a Developer ID authority and your team id.
 
-## What the script does per bundle
+## What the script does
 
-1. `codesign --force -s "$CODE_SIGN_IDENTITY" --timestamp --options runtime`
-  (hardened runtime + secure timestamp are required by notarization).
-2. `codesign --verify --deep --strict`.
-3. With `--notarize`: `ditto` zip → `xcrun notarytool submit --wait` →
-  `xcrun stapler staple` → `xcrun stapler validate` → `spctl -a -vv -t install`.
-4. Copies the result to `dist/` and refreshes the installed copy.
+1. Wipes `port/build/VST3/Release` and the in-tree Xcode objects, then
+   rebuilds all 25 plugins with `-DCALFNXT_PORT_VERSION=<version>`.
+2. `codesign --force -s "$CODE_SIGN_IDENTITY" --timestamp --options runtime`
+   (hardened runtime + secure timestamp are required by notarization).
+3. `codesign --verify --deep --strict`.
+4. With `--notarize`: one `ditto` zip of all bundles →
+   `xcrun notarytool submit --wait` → `xcrun stapler staple` +
+   `xcrun stapler validate` per bundle → `spctl -a -vv -t install`.
+5. Copies the result to `Releases/<version>/`, zips the suite to
+   `Releases/calfNXT-macOS-<version>.zip`, and refreshes the installed copies.
 
 **Rebuild or re-sign requires a new notarization and staple.**
 

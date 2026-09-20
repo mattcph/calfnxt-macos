@@ -5,6 +5,15 @@
 # Embed this plugin's packed SPA into the VST3 bundle Resources/webui.
 # Registers the target for `make install` (CALFNXT_INSTALL_TARGETS).
 function(calfnxt_copy_plugin_ui target plugin_id vst3_dirname)
+  # Stamp the bundle metadata (identifier + version). The SDK only fills the
+  # generated Info.plist when smtg_target_set_bundle runs; the upstream
+  # dsp/<id> CMakeLists never call it, so do it here for all 25 plugins.
+  # PROJECT_VERSION comes from -DCALFNXT_PORT_VERSION (default 2.3.1).
+  smtg_target_set_bundle(${target}
+    BUNDLE_IDENTIFIER "com.deuso.calfnxt.${plugin_id}"
+    COMPANY_NAME "Matt Hardy"
+  )
+
   set(plugin_dist "${CALFNXT_UI_DIST}/plugins/${plugin_id}")
   set(res_stamp "${CMAKE_BINARY_DIR}/${target}.resources.stamp")
 

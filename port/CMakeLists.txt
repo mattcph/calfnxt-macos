@@ -16,8 +16,12 @@ set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
 set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "" FORCE)
 
+# Port release version (e.g. 2.3.1.1). tools/release.sh passes
+# -DCALFNXT_PORT_VERSION=… so bundle Info.plist matches the local tag.
+set(CALFNXT_PORT_VERSION "2.3.1" CACHE STRING "calfNXT macOS port release version")
+
 project(calfnxt_macos
-  VERSION 2.3.1
+  VERSION ${CALFNXT_PORT_VERSION}
   DESCRIPTION "calfNXT — macOS VST3 port (in-process WKWebView)"
   LANGUAGES C CXX OBJCXX
 )

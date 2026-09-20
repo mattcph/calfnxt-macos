@@ -12,12 +12,12 @@
 #   make dsp                  # DSP targets only
 #   make install              # copy bundles to ~/Library/Audio/Plug-Ins/VST3
 #   make check                # validator + seam drift checks
-#   make release              # Developer ID sign → dist/ (credentials in .env.local)
-#   make release NOTARIZE=1   #   + notarize + staple (see HOWTO-DISTRIBUTE.md)
+#   make release VERSION=2.3.1.1            # clean rebuild + Developer ID sign → Releases/2.3.1.1/
+#   make release VERSION=2.3.1.1 NOTARIZE=1 #   + notarize + staple (see HOWTO-DISTRIBUTE.md)
 #   make sync-upstream TAG=vX.Y.Z
 #   make clean | distclean
 #
-# Variables: CONFIG=Release|Debug  PLUGIN=<id>  JOBS=<n>  NOTARIZE=1
+# Variables: CONFIG=Release|Debug  PLUGIN=<id>  JOBS=<n>  NOTARIZE=1  VERSION=2.3.1.1
 # Release credentials: CODE_SIGN_IDENTITY / DEVELOPMENT_TEAM / NOTARY_PROFILE
 # (usually via repo-root .env.local — see .env.local.example)
 
@@ -40,7 +40,7 @@ endif
 .PHONY: all ui dsp install check release sync-upstream clean distclean configure
 
 # Release credentials propagate to tools/release.sh (which also loads .env.local).
-export CODE_SIGN_IDENTITY DEVELOPMENT_TEAM CODE_SIGN_STYLE NOTARY_PROFILE
+export CODE_SIGN_IDENTITY DEVELOPMENT_TEAM CODE_SIGN_STYLE NOTARY_PROFILE VERSION
 
 all: $(TARGETS)
 
@@ -69,8 +69,9 @@ check: configure
 	@"$(CURDIR)/tools/check-seam.sh" "$(UPSTREAM)"
 	@"$(CURDIR)/tools/validate-all.sh" "$(BUILD_DIR)" "$(CONFIG)"
 
-release: all
-	@"$(CURDIR)/tools/release.sh" $(PLUGIN) $(if $(NOTARIZE),--notarize,) CONFIG=$(CONFIG)
+# release.sh owns the clean rebuild; do not depend on incremental `all` here.
+release:
+	@"$(CURDIR)/tools/release.sh" $(VERSION) $(if $(NOTARIZE),--notarize,) CONFIG=$(CONFIG)
 
 sync-upstream:
 	@"$(CURDIR)/tools/upstream-sync.sh" "$(TAG)"

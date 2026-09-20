@@ -1,11 +1,23 @@
 #!/bin/bash
 #-----------------------------------------------------------------------------
-# calfNXT macOS — release: Developer ID sign, verify, optional notarize + staple.
+# calfNXT macOS — versioned release: clean rebuild, Developer ID sign,
+# notarize + staple, and a versioned local backup.
 #
-#   tools/release.sh                        # sign all 25 (identity from .env.local / env)
-#   tools/release.sh equalizer              # one plugin (substring match on bundle name)
-#   tools/release.sh --notarize             # sign + notarize + staple all 25
-#   tools/release.sh compressor --notarize  # one plugin, full pipeline
+#   tools/release.sh 2.3.1.1                  # clean rebuild + sign all 25
+#   tools/release.sh 2.3.1.1 --notarize       # + notarize + staple all 25
+#   make -C port release VERSION=2.3.1.1 NOTARIZE=1
+#
+# The version (e.g. 2.3.1.1) is required. It is baked into the bundles
+# (CFBundleShortVersionString) and used for the backup folder:
+#
+#   Releases/2.3.1.1/<Name>.vst3            # versioned local backup (repo root)
+#   Releases/calfNXT-macOS-2.3.1.1.zip      # ready for a manual GitHub Release
+#
+# (dist/ is the scratch/test area; Releases/ is the versioned backup.)
+#
+# This script always wipes port/build/VST3/<CONFIG> and the in-tree Xcode
+# object files before rebuilding, so a notarized run can never pick up stale
+# products from an earlier submodule.
 #
 # Credentials: repo-root .env.local (gitignored) — see .env.local.example.
 #   CODE_SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)"
@@ -14,8 +26,8 @@
 #                                 store-credentials` — see port/HOWTO-DISTRIBUTE.md)
 #
 # Make-style KEY=VALUE overrides (override .env.local):
-#   tools/release.sh equalizer CODE_SIGN_IDENTITY="Developer ID Application: …" \
-#     CONFIG=Release NOTARY_PROFILE=com.calfNXT
+#   tools/release.sh 2.3.1.1 --notarize \
+#     CODE_SIGN_IDENTITY="Developer ID Application: …" NOTARY_PROFILE=com.calfNXT
 #
 # NOTE: local DAW testing does NOT need this script — `make install` produces
 # ad-hoc signed bundles, which is correct for this machine. This script is the
@@ -27,7 +39,7 @@ PORT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="$(cd "$PORT_DIR/.." && pwd)"
 
 NOTARIZE=0
-MATCH=""
+VERSION="${VERSION:-}"
 
 # Optional local release credentials (never commit .env.local).
 if [ -f "$ROOT/.env.local" ]; then
@@ -42,27 +54,51 @@ CODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY:--}"
 DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-com.calfNXT}"
 CONFIG="${CONFIG:-Release}"
+JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 8)}"
 
 for arg in "$@"; do
   case "$arg" in
     --notarize) NOTARIZE=1 ;;
     -h|--help)
-      sed -n '2,22p' "${BASH_SOURCE[0]}"
+      sed -n '2,32p' "${BASH_SOURCE[0]}"
       exit 0
       ;;
-    CONFIG=*|CODE_SIGN_IDENTITY=*|DEVELOPMENT_TEAM=*|NOTARY_PROFILE=*)
+    CONFIG=*|CODE_SIGN_IDENTITY=*|DEVELOPMENT_TEAM=*|NOTARY_PROFILE=*|VERSION=*)
       key="${arg%%=*}"; val="${arg#*=}"
       case "$key" in
         CONFIG) CONFIG="$val" ;;
         CODE_SIGN_IDENTITY) CODE_SIGN_IDENTITY="$val" ;;
         DEVELOPMENT_TEAM) DEVELOPMENT_TEAM="$val" ;;
         NOTARY_PROFILE) NOTARY_PROFILE="$val" ;;
+        VERSION) VERSION="$val" ;;
       esac
       ;;
     --*) echo "[calfNXT] ERROR: unknown option '$arg' (supported: --notarize)" >&2; exit 1 ;;
-    *) MATCH="$arg" ;;
+    *)
+      if [ -z "$VERSION" ]; then
+        VERSION="$arg"
+      else
+        echo "[calfNXT] ERROR: unexpected argument '$arg'" >&2
+        exit 1
+      fi
+      ;;
   esac
 done
+
+# Ask for the version when interactive; fail when scripted.
+if [ -z "$VERSION" ] && [ -t 0 ]; then
+  read -r -p "Release version (e.g. 2.3.1.1): " VERSION
+fi
+if [ -z "$VERSION" ]; then
+  echo "[calfNXT] ERROR: release version required." >&2
+  echo "          Usage: tools/release.sh 2.3.1.1 [--notarize]" >&2
+  echo "          or:    make -C port release VERSION=2.3.1.1 NOTARIZE=1" >&2
+  exit 1
+fi
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+  echo "[calfNXT] ERROR: version '$VERSION' must look like N.N.N or N.N.N.N" >&2
+  exit 1
+fi
 
 if [ "$NOTARIZE" = 1 ] && [ "$CODE_SIGN_IDENTITY" = "-" ]; then
   echo "[calfNXT] ERROR: --notarize needs CODE_SIGN_IDENTITY='Developer ID Application: ...'" >&2
@@ -70,28 +106,42 @@ if [ "$NOTARIZE" = 1 ] && [ "$CODE_SIGN_IDENTITY" = "-" ]; then
   exit 1
 fi
 
-VST3_DIR="$PORT_DIR/build/VST3/$CONFIG"
+BUILD_DIR="$PORT_DIR/build"
+VST3_DIR="$BUILD_DIR/VST3/$CONFIG"
+RELEASES_DIR="$ROOT/Releases"
+DIST_VERSION_DIR="$RELEASES_DIR/$VERSION"
+DIST_ZIP="$RELEASES_DIR/calfNXT-macOS-$VERSION.zip"
+
+echo "[calfNXT] Release $VERSION — identity: $CODE_SIGN_IDENTITY$([ "$NOTARIZE" = 1 ] && echo ' [notarize]')"
+
+# --- 1. Wipe stale products + in-tree Xcode objects, then rebuild ----------
+echo "[calfNXT] Clean: $VST3_DIR and $BUILD_DIR/build"
+rm -rf "$VST3_DIR" "$BUILD_DIR/build"
+
+cmake -S "$PORT_DIR" -B "$BUILD_DIR" -G Xcode \
+  -DSMTG_XCODE_MANUAL_CODE_SIGN_STYLE=ON \
+  -DSMTG_BUILD_UNIVERSAL_BINARY=OFF \
+  -DCALFNXT_PORT_VERSION:STRING="$VERSION"
+
+cmake --build "$BUILD_DIR" --config "$CONFIG" --target calfnxt-plugins --parallel "$JOBS"
+
 if [ ! -d "$VST3_DIR" ]; then
-  echo "[calfNXT] ERROR: no build tree at $VST3_DIR — run 'make -C port' first" >&2
+  echo "[calfNXT] ERROR: no build products at $VST3_DIR after rebuild" >&2
   exit 1
 fi
 
-# Collect bundles (all, or case-insensitive substring match on the bundle name).
-shopt -s nocasematch
+# Collect the freshly built bundles.
 BUNDLES=()
 while IFS= read -r -d '' b; do
-  name="$(basename "$b" .vst3)"
-  if [ -z "$MATCH" ] || [[ "$name" == *"$MATCH"* ]]; then
-    BUNDLES+=("$b")
-  fi
+  BUNDLES+=("$b")
 done < <(find "$VST3_DIR" -maxdepth 1 -name '*.vst3' -print0 | sort -z)
 
 if [ "${#BUNDLES[@]}" -eq 0 ]; then
-  echo "[calfNXT] ERROR: no bundles matching '${MATCH:-<all>}' in $VST3_DIR" >&2
+  echo "[calfNXT] ERROR: no .vst3 bundles in $VST3_DIR" >&2
   exit 1
 fi
 
-echo "[calfNXT] Releasing ${#BUNDLES[@]} bundle(s) — identity: $CODE_SIGN_IDENTITY$([ "$NOTARIZE" = 1 ] && echo ' [notarize]')"
+echo "[calfNXT] Signing ${#BUNDLES[@]} bundle(s) ..."
 
 sign_bundle() {
   local bundle="$1"
@@ -106,40 +156,6 @@ sign_bundle() {
   codesign -dv --verbose=4 "$bundle" 2>&1 | grep -E '^(Authority|TeamIdentifier|Identifier)=' | sed 's/^/  /' || true
 }
 
-notarize_bundle() {
-  local bundle="$1"
-  local name
-  name="$(basename "$bundle" .vst3)"
-  local stage_dir zip
-  stage_dir="$(mktemp -d /tmp/calfnxt-notarize.XXXXXX)"
-  zip="$stage_dir/${name}.vst3.zip"
-  echo "[calfNXT] $name: notarytool submit (profile: $NOTARY_PROFILE) ..."
-  ditto -c -k --keepParent "$bundle" "$zip"
-  xcrun notarytool submit "$zip" --keychain-profile "$NOTARY_PROFILE" --wait
-  echo "[calfNXT] $name: staple ..."
-  xcrun stapler staple "$bundle"
-  xcrun stapler validate "$bundle"
-  spctl -a -vv -t install "$bundle" || true
-  rm -rf "$stage_dir"
-}
-
-publish() {
-  local bundle="$1"
-  local name dest
-  name="$(basename "$bundle")"
-  # dist/ drop (repo root, gitignored)
-  dest="$ROOT/dist/$name"
-  mkdir -p "$ROOT/dist"
-  rm -rf "$dest"
-  cp -R "$bundle" "$dest"
-  xattr -cr "$dest" 2>/dev/null || true
-  # refresh the user install
-  dest="$HOME/Library/Audio/Plug-Ins/VST3/$name"
-  rm -rf "$dest"
-  cp -R "$bundle" "$dest"
-  xattr -cr "$dest" 2>/dev/null || true
-}
-
 FAILED=()
 for bundle in "${BUNDLES[@]}"; do
   name="$(basename "$bundle" .vst3)"
@@ -148,21 +164,75 @@ for bundle in "${BUNDLES[@]}"; do
   if ! sign_bundle "$bundle"; then
     echo "[calfNXT] ERROR: signing failed for $name" >&2
     FAILED+=("$name")
-    continue
   fi
-  if [ "$NOTARIZE" = 1 ]; then
-    if ! notarize_bundle "$bundle"; then
-      echo "[calfNXT] ERROR: notarization failed for $name" >&2
+done
+
+if [ "${#FAILED[@]}" -ne 0 ]; then
+  echo "[calfNXT] FAILED to sign: ${FAILED[*]}" >&2
+  exit 1
+fi
+
+# --- 2. Notarize once for the whole suite, then staple each bundle ---------
+if [ "$NOTARIZE" = 1 ]; then
+  stage_dir="$(mktemp -d /tmp/calfnxt-notarize.XXXXXX)"
+  suite_zip="$stage_dir/calfNXT-macOS-$VERSION.zip"
+  echo "[calfNXT] notarytool submit (profile: $NOTARY_PROFILE) — ${#BUNDLES[@]} bundles ..."
+  # ditto takes one source: stage the bundles, then zip the folder.
+  mkdir -p "$stage_dir/suite"
+  for bundle in "${BUNDLES[@]}"; do
+    cp -R "$bundle" "$stage_dir/suite/"
+  done
+  ditto -c -k --keepParent "$stage_dir/suite" "$suite_zip"
+  xcrun notarytool submit "$suite_zip" --keychain-profile "$NOTARY_PROFILE" --wait
+  rm -rf "$stage_dir"
+
+  for bundle in "${BUNDLES[@]}"; do
+    name="$(basename "$bundle" .vst3)"
+    echo "[calfNXT] $name: staple ..."
+    if ! xcrun stapler staple "$bundle"; then
+      echo "[calfNXT] ERROR: staple failed for $name" >&2
       FAILED+=("$name")
       continue
     fi
+    xcrun stapler validate "$bundle"
+    spctl -a -vv -t install "$bundle" || true
+  done
+
+  if [ "${#FAILED[@]}" -ne 0 ]; then
+    echo "[calfNXT] FAILED to staple: ${FAILED[*]}" >&2
+    exit 1
   fi
-  publish "$bundle"
+fi
+
+# --- 3. Versioned backup + install -----------------------------------------
+mkdir -p "$DIST_VERSION_DIR"
+for bundle in "${BUNDLES[@]}"; do
+  name="$(basename "$bundle")"
+  dest="$DIST_VERSION_DIR/$name"
+  rm -rf "$dest"
+  cp -R "$bundle" "$dest"
+  xattr -cr "$dest" 2>/dev/null || true
+
+  # refresh the user install
+  dest="$HOME/Library/Audio/Plug-Ins/VST3/$name"
+  rm -rf "$dest"
+  cp -R "$bundle" "$dest"
+  xattr -cr "$dest" 2>/dev/null || true
 done
 
+# Suite zip for a manual GitHub Release (contains the stapled bundles).
+rm -f "$DIST_ZIP"
+zip_stage="$(mktemp -d /tmp/calfnxt-dist.XXXXXX)"
+mkdir -p "$zip_stage/suite"
+for bundle in "${BUNDLES[@]}"; do
+  cp -R "$DIST_VERSION_DIR/$(basename "$bundle")" "$zip_stage/suite/"
+done
+ditto -c -k --keepParent "$zip_stage/suite" "$DIST_ZIP"
+rm -rf "$zip_stage"
+
 echo "======================================================================"
-if [ "${#FAILED[@]}" -ne 0 ]; then
-  echo "[calfNXT] FAILED: ${FAILED[*]}" >&2
-  exit 1
-fi
-echo "[calfNXT] Done. dist/ + ~/Library/Audio/Plug-Ins/VST3 updated$([ "$NOTARIZE" = 1 ] && echo ' (notarized + stapled)')."
+echo "[calfNXT] Done: $VERSION"
+echo "  backup:  $DIST_VERSION_DIR"
+echo "  zip:     $DIST_ZIP"
+echo "  install: ~/Library/Audio/Plug-Ins/VST3"
+[ "$NOTARIZE" = 1 ] && echo "  (notarized + stapled)"
