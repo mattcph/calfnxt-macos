@@ -67,9 +67,9 @@ Releases/calfNXT-macOS-2.3.1.1.zip      # ready to attach to a GitHub Release
 (`dist/` stays the scratch/test area; `Releases/` keeps every version beside
 the previous ones, like auxVST.)
 
-`tools/release.sh` always wipes `port/build/VST3/Release` and the in-tree
-Xcode object files before rebuilding, so a notarized run can never staple
-stale products from an earlier submodule.
+`tools/release.sh` always wipes `port/build` (same as `make clean`) before
+rebuilding, so a notarized run can never staple stale products or bake a
+leftover version from an earlier configure.
 
 Or call the script directly with Make-style overrides:
 
@@ -93,8 +93,8 @@ Confirm a Developer ID authority and your team id.
 
 ## What the script does
 
-1. Wipes `port/build/VST3/Release` and the in-tree Xcode objects, then
-   rebuilds all 25 plugins with `-DCALFNXT_PORT_VERSION=<version>`.
+1. Wipes `port/build` (same as `make clean`), then rebuilds all 25 plugins
+   with `-DCALFNXT_PORT_VERSION=<version>` (no fallback tag).
 2. `codesign --force -s "$CODE_SIGN_IDENTITY" --timestamp --options runtime`
    (hardened runtime + secure timestamp are required by notarization).
 3. `codesign --verify --deep --strict`.

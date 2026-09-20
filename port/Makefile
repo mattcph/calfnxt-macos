@@ -40,7 +40,9 @@ endif
 .PHONY: all ui dsp install check release sync-upstream clean distclean configure
 
 # Release credentials propagate to tools/release.sh (which also loads .env.local).
-export CODE_SIGN_IDENTITY DEVELOPMENT_TEAM CODE_SIGN_STYLE NOTARY_PROFILE VERSION
+# VERSION is passed as an argument, not exported — exporting it made
+# `make release VERSION=2.3.1.1` look like a duplicate arg.
+export CODE_SIGN_IDENTITY DEVELOPMENT_TEAM CODE_SIGN_STYLE NOTARY_PROFILE
 
 all: $(TARGETS)
 

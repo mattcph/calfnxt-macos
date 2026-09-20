@@ -16,15 +16,23 @@ set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
 set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "" FORCE)
 
-# Port release version (e.g. 2.3.1.1). tools/release.sh passes
-# -DCALFNXT_PORT_VERSION=… so bundle Info.plist matches the local tag.
-set(CALFNXT_PORT_VERSION "2.3.1" CACHE STRING "calfNXT macOS port release version")
+# Port release version (e.g. 2.3.1.1). No default — a silent fallback would
+# bake the wrong tag into Info.plist. tools/release.sh always passes
+# -DCALFNXT_PORT_VERSION=…; local `make` leaves the field unset.
+set(CALFNXT_PORT_VERSION "" CACHE STRING "calfNXT macOS port release version")
 
-project(calfnxt_macos
-  VERSION ${CALFNXT_PORT_VERSION}
-  DESCRIPTION "calfNXT — macOS VST3 port (in-process WKWebView)"
-  LANGUAGES C CXX OBJCXX
-)
+if(CALFNXT_PORT_VERSION)
+  project(calfnxt_macos
+    VERSION ${CALFNXT_PORT_VERSION}
+    DESCRIPTION "calfNXT — macOS VST3 port (in-process WKWebView)"
+    LANGUAGES C CXX OBJCXX
+  )
+else()
+  project(calfnxt_macos
+    DESCRIPTION "calfNXT — macOS VST3 port (in-process WKWebView)"
+    LANGUAGES C CXX OBJCXX
+  )
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

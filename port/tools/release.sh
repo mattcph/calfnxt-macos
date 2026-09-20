@@ -15,9 +15,8 @@
 #
 # (dist/ is the scratch/test area; Releases/ is the versioned backup.)
 #
-# This script always wipes port/build/VST3/<CONFIG> and the in-tree Xcode
-# object files before rebuilding, so a notarized run can never pick up stale
-# products from an earlier submodule.
+# This script always wipes port/build (same as `make clean`) before rebuilding,
+# so a notarized run can never pick up stale products or a leftover version.
 #
 # Credentials: repo-root .env.local (gitignored) — see .env.local.example.
 #   CODE_SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)"
@@ -77,6 +76,8 @@ for arg in "$@"; do
     *)
       if [ -z "$VERSION" ]; then
         VERSION="$arg"
+      elif [ "$arg" = "$VERSION" ]; then
+        : # already set from the environment; ignore the duplicate
       else
         echo "[calfNXT] ERROR: unexpected argument '$arg'" >&2
         exit 1
@@ -114,9 +115,9 @@ DIST_ZIP="$RELEASES_DIR/calfNXT-macOS-$VERSION.zip"
 
 echo "[calfNXT] Release $VERSION — identity: $CODE_SIGN_IDENTITY$([ "$NOTARIZE" = 1 ] && echo ' [notarize]')"
 
-# --- 1. Wipe stale products + in-tree Xcode objects, then rebuild ----------
-echo "[calfNXT] Clean: $VST3_DIR and $BUILD_DIR/build"
-rm -rf "$VST3_DIR" "$BUILD_DIR/build"
+# --- 1. Same wipe as `make clean`, then rebuild with the required version ---
+echo "[calfNXT] Clean: $BUILD_DIR"
+rm -rf "$BUILD_DIR"
 
 cmake -S "$PORT_DIR" -B "$BUILD_DIR" -G Xcode \
   -DSMTG_XCODE_MANUAL_CODE_SIGN_STYLE=ON \
