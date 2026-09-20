@@ -61,6 +61,7 @@ bundles (`CFBundleShortVersionString`) and used for the local backup:
 ```text
 Releases/2.3.1.1/<Name>.vst3            # versioned backup (repo root, gitignored)
 Releases/calfNXT-macOS-2.3.1.1.zip      # ready to attach to a GitHub Release
+                                        #   unpacks as calfNXT-2.3.1.1/<Name>.vst3
 ~/Library/Audio/Plug-Ins/VST3/<Name>.vst3  # installed copy
 ```
 
@@ -102,7 +103,8 @@ Confirm a Developer ID authority and your team id.
    `xcrun notarytool submit --wait` → `xcrun stapler staple` +
    `xcrun stapler validate` per bundle → `spctl -a -vv -t install`.
 5. Copies the result to `Releases/<version>/`, zips the suite to
-   `Releases/calfNXT-macOS-<version>.zip`, and refreshes the installed copies.
+   `Releases/calfNXT-macOS-<version>.zip` (unpacks as `calfNXT-<version>/`),
+   and refreshes the installed copies.
 
 **Rebuild or re-sign requires a new notarization and staple.**
 

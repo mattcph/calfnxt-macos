@@ -15,3 +15,6 @@ node_modules/
 # Patch workflow leftovers (git apply / patch rejects)
 *.orig
 *.rej
+
+# misc
+.cursor/
