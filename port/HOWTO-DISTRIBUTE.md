@@ -104,7 +104,10 @@ Confirm a Developer ID authority and your team id.
    `xcrun stapler validate` per bundle → `spctl -a -vv -t install`.
 5. Copies the result to `Releases/<version>/`, zips the suite to
    `Releases/calfNXT-macOS-<version>.zip` (unpacks as `calfNXT-MacOS-<version>/`),
-   and refreshes the installed copies.
+   and refreshes the installed copies. The zip is built with
+   `ditto --norsrc --noextattr --noacl` so `.DS_Store` / AppleDouble `._`
+   files cannot land inside a signed bundle (that breaks the seal on
+   another Mac). The staple is kept; the script does not `xattr -cr`.
 
 **Rebuild or re-sign requires a new notarization and staple.**
 

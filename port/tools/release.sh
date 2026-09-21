@@ -144,8 +144,21 @@ fi
 
 echo "[calfNXT] Signing ${#BUNDLES[@]} bundle(s) ..."
 
+# Finder drops .DS_Store / AppleDouble (._*) inside bundles. Those files are
+# not in CodeResources, so another Mac's unzip reports "sealed resource is
+# missing or invalid". Strip them before sign and before zip.
+strip_finder_junk() {
+  find "$1" \( -name '.DS_Store' -o -name '._*' \) -delete 2>/dev/null || true
+}
+
+# PKZip without resource forks / xattrs / ACLs — no ._ files in the archive.
+zip_folder() {
+  ditto -c -k --keepParent --norsrc --noextattr --noacl "$1" "$2"
+}
+
 sign_bundle() {
   local bundle="$1"
+  strip_finder_junk "$bundle"
   if [ "$CODE_SIGN_IDENTITY" = "-" ]; then
     # Ad-hoc: refresh the linker signature after resource embedding.
     codesign --force -s - "$bundle"
@@ -182,9 +195,10 @@ if [ "$NOTARIZE" = 1 ]; then
   inner="calfNXT-MacOS-$VERSION"
   mkdir -p "$stage_dir/$inner"
   for bundle in "${BUNDLES[@]}"; do
-    cp -R "$bundle" "$stage_dir/$inner/"
+    ditto "$bundle" "$stage_dir/$inner/$(basename "$bundle")"
   done
-  ditto -c -k --keepParent "$stage_dir/$inner" "$suite_zip"
+  strip_finder_junk "$stage_dir/$inner"
+  zip_folder "$stage_dir/$inner" "$suite_zip"
   xcrun notarytool submit "$suite_zip" --keychain-profile "$NOTARY_PROFILE" --wait
   rm -rf "$stage_dir"
 
@@ -212,26 +226,27 @@ for bundle in "${BUNDLES[@]}"; do
   name="$(basename "$bundle")"
   dest="$DIST_VERSION_DIR/$name"
   rm -rf "$dest"
-  cp -R "$bundle" "$dest"
-  xattr -cr "$dest" 2>/dev/null || true
+  ditto "$bundle" "$dest"
+  # Do not xattr -cr: that strips the notarization staple.
+  xattr -d com.apple.quarantine "$dest" 2>/dev/null || true
 
-  # refresh the user install
   dest="$HOME/Library/Audio/Plug-Ins/VST3/$name"
   rm -rf "$dest"
-  cp -R "$bundle" "$dest"
-  xattr -cr "$dest" 2>/dev/null || true
+  ditto "$bundle" "$dest"
+  xattr -d com.apple.quarantine "$dest" 2>/dev/null || true
 done
 
-# Suite zip for a manual GitHub Release (contains the stapled bundles).
+# Suite zip for a manual GitHub Release (stapled bundles, no Finder junk).
 # Unpacks as calfNXT-MacOS-<version>/, not a dump of 25 bundles in cwd.
 rm -f "$DIST_ZIP"
 zip_stage="$(mktemp -d /tmp/calfnxt-dist.XXXXXX)"
 inner="calfNXT-MacOS-$VERSION"
 mkdir -p "$zip_stage/$inner"
 for bundle in "${BUNDLES[@]}"; do
-  cp -R "$DIST_VERSION_DIR/$(basename "$bundle")" "$zip_stage/$inner/"
+  ditto "$DIST_VERSION_DIR/$(basename "$bundle")" "$zip_stage/$inner/$(basename "$bundle")"
 done
-ditto -c -k --keepParent "$zip_stage/$inner" "$DIST_ZIP"
+strip_finder_junk "$zip_stage/$inner"
+zip_folder "$zip_stage/$inner" "$DIST_ZIP"
 rm -rf "$zip_stage"
 
 echo "======================================================================"
