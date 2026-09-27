@@ -14,7 +14,7 @@ UPSTREAM="$(cd "$PORT/../calfnxt" && pwd)"
 
 PLUGINS="equalizer stereo transients compressor expander deesser delay reverb \
 mbcomp limiter mblimiter harmonics analyzer filter ringmod pulsator \
-crusher phaser flanger chorus split tuner octaver bender impulse"
+crusher phaser flanger chorus split tuner octaver bender impulse tamer"
 
 VALIDATOR="$BUILD/bin/$CONFIG/validator"
 [ -x "$VALIDATOR" ] || VALIDATOR="$BUILD/bin/validator"

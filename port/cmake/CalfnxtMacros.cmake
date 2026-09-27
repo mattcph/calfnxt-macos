@@ -7,7 +7,7 @@
 function(calfnxt_copy_plugin_ui target plugin_id vst3_dirname)
   # Stamp the bundle metadata (identifier + version). The SDK only fills the
   # generated Info.plist when smtg_target_set_bundle runs; the upstream
-  # dsp/<id> CMakeLists never call it, so do it here for all 25 plugins.
+  # dsp/<id> CMakeLists never call it, so do it here for all 26 plugins.
   # PROJECT_VERSION comes from -DCALFNXT_PORT_VERSION (required for release;
   # local `make` leaves it unset — no fallback tag).
   smtg_target_set_bundle(${target}

@@ -6,18 +6,18 @@
 # metadata (PkgInfo, full Info.plist) and applies the SDK's codesign step.
 # Local builds are ad-hoc signed; distribution signing is tools/release.sh.
 #
-#   make                      # configure + build all 25 plugins (UI + DSP + bundle + sign)
+#   make                      # configure + build all 26 plugins (UI + DSP + bundle + sign)
 #   make PLUGIN=compressor    # one plugin
 #   make ui                   # UI packs only
 #   make dsp                  # DSP targets only
 #   make install              # copy bundles to ~/Library/Audio/Plug-Ins/VST3
 #   make check                # validator + seam drift checks
-#   make release VERSION=2.3.1.1            # clean rebuild + Developer ID sign → Releases/2.3.1.1/
-#   make release VERSION=2.3.1.1 NOTARIZE=1 #   + notarize + staple (see HOWTO-DISTRIBUTE.md)
+#   make release VERSION=2.7.0.1            # clean rebuild + Developer ID sign → Releases/2.7.0.1/
+#   make release VERSION=2.7.0.1 NOTARIZE=1 #   + notarize + staple (see HOWTO-DISTRIBUTE.md)
 #   make sync-upstream TAG=vX.Y.Z
 #   make clean | distclean
 #
-# Variables: CONFIG=Release|Debug  PLUGIN=<id>  JOBS=<n>  NOTARIZE=1  VERSION=2.3.1.1
+# Variables: CONFIG=Release|Debug  PLUGIN=<id>  JOBS=<n>  NOTARIZE=1  VERSION=2.7.0.1
 # Release credentials: CODE_SIGN_IDENTITY / DEVELOPMENT_TEAM / NOTARY_PROFILE
 # (usually via repo-root .env.local — see .env.local.example)
 
@@ -29,7 +29,7 @@ UPSTREAM    := $(CURDIR)/../calfnxt
 
 PLUGINS     := equalizer stereo transients compressor expander deesser delay reverb \
                mbcomp limiter mblimiter harmonics analyzer filter ringmod pulsator \
-               crusher phaser flanger chorus split tuner octaver bender impulse
+               crusher phaser flanger chorus split tuner octaver bender impulse tamer
 
 ifeq ($(PLUGIN),)
   TARGETS   := calfnxt-plugins
@@ -41,7 +41,7 @@ endif
 
 # Release credentials propagate to tools/release.sh (which also loads .env.local).
 # VERSION is passed as an argument, not exported — exporting it made
-# `make release VERSION=2.3.1.1` look like a duplicate arg.
+# `make release VERSION=2.7.0.1` look like a duplicate arg.
 export CODE_SIGN_IDENTITY DEVELOPMENT_TEAM CODE_SIGN_STYLE NOTARY_PROFILE
 
 all: $(TARGETS)

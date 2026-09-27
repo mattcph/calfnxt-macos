@@ -1,7 +1,7 @@
 # calfNXT macOS: DAW verification checklist
 
 Manual checkpoint for the pilot plugins (**calfNXT Compressor**, **calfNXT
-Equalizer**) in **Nuendo** and **Ableton Live**. All 25 bundles are installed
+Equalizer**) in **Nuendo** and **Ableton Live**. All 26 bundles are installed
 to `~/Library/Audio/Plug-Ins/VST3/`; start with these two.
 
 If something misbehaves, note the plugin, the step, and grab
@@ -76,11 +76,19 @@ Inspect Element) and the per-tick viz dump (`window.__calfnxtDumpViz()`).
   chunk) and the library root is remembered for next time
   (`~/.config/calfnxt/impulse-library` until upstream merges patch 0004).
 
+## 8. 2.7.0 surfaces
+
+- [ ] **Tamer** (`calfNXTTamer`) opens, the resonance chart draws, and the
+  harmonic-protect guides move with the harmonics control.
+- [ ] **Analyzer** loudness block (M/S/I, true peak) moves with program, and
+  Reset / Reset Peak clear the integrated and latched values.
+- [ ] **Equalizer** and **Compressor** channel mode (Stereo / L / R / Mid /
+  Side) changes which path is processed; Listen solos that path.
+
 ## Known limitations (by design, this release)
 
-- Shipped binaries are **pristine upstream v2.3.1**: the RT-safety fixes live
-  in `port/patches/` (0001-0003) until Markus merges them. Audio-thread locks
-  remain in the shipped build.
+- Shipped binaries are pristine upstream **v2.7.0**. The dynamics and Impulse
+  realtime-safety work landed upstream in 2.4.0.
 - Impulse's default library dir is `~/.config/calfnxt` (Linux-style) until
   patch 0004 lands upstream.
 - Mono bus arrangements are rejected by upstream `setBusArrangements`; the

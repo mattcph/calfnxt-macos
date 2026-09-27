@@ -19,10 +19,12 @@ export type calfNXTMsg =
   | { t: 'viewport'; w: number; h: number }
   | { t: '_diag'; msg?: string; w?: number; h?: number }
   | { t: 'io'; ch: number; in?: number; out?: number }
-  | { t: 'viz'; id: string; kind: 'levels' | 'unit' | 'spectrum' | 'gains' | 'corr' | 'gonio' | 'envelope' | 'pitch' | 'midi' | 'gr' | 'bandio' | 'point' | 'tempo' | 'shape' | 'hz' | 'ctrl' | 'lfo' | 'response' | 'comb' | 'wave'; v: number[] | Float32Array }
+  | { t: 'viz'; id: string; kind: 'levels' | 'unit' | 'spectrum' | 'gains' | 'corr' | 'gonio' | 'envelope' | 'pitch' | 'midi' | 'gr' | 'bandio' | 'point' | 'tempo' | 'shape' | 'hz' | 'ctrl' | 'lfo' | 'response' | 'comb' | 'ladder' | 'wave' | 'loudness'; v: number[] | Float32Array }
   | { t: 'vizcfg'; id: string; bins?: number }
   | { t: 'vizhz'; hz: number }
   | { t: 'midi'; cmd: string }
+  /** Analyzer: reset integrated loudness (`reset`) or latched spectrum peaks (`resetpeak`). */
+  | { t: 'meter'; cmd: string }
   | { t: 'ir'; cmd: string; path?: string; root?: string; sel?: string; status?: string; tree?: IrNode[]; open?: string[]; scroll?: number };
 
 /** Plain float from a host→UI param message (`v`). */

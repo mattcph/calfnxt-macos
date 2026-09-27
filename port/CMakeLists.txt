@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Matt Hardy — GPL-3.0-or-later.
 #
 # One graph: vst3sdk once, common/native (ParamBridge + WKWebView), the
-# WebEditor, common/dsp + 25 dsp/<id> plugins, per-plugin Vite UI builds,
+# WebEditor, common/dsp + 26 dsp/<id> plugins, per-plugin Vite UI builds,
 # bundle, ad-hoc sign. Driven by the adjacent Makefile.
 cmake_minimum_required(VERSION 3.25)
 
@@ -16,7 +16,7 @@ set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
 set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "" FORCE)
 
-# Port release version (e.g. 2.3.1.1). No default — a silent fallback would
+# Port release version (e.g. 2.7.0.1). No default — a silent fallback would
 # bake the wrong tag into Info.plist. tools/release.sh always passes
 # -DCALFNXT_PORT_VERSION=…; local `make` leaves the field unset.
 set(CALFNXT_PORT_VERSION "" CACHE STRING "calfNXT macOS port release version")
@@ -60,7 +60,7 @@ if(NOT EXISTS "${VST3_SDK_ROOT}/CMakeLists.txt")
     "  or pass -DVST3_SDK_ROOT=/path/to/vst3sdk")
 endif()
 
-# --- VST3 SDK (once for all 25 plugins) ------------------------------------
+# --- VST3 SDK (once for all 26 plugins) ------------------------------------
 add_subdirectory("${VST3_SDK_ROOT}" "${CMAKE_BINARY_DIR}/vst3sdk-build")
 set(SDK_ROOT "${VST3_SDK_ROOT}")
 set(public_sdk_SOURCE_DIR "${VST3_SDK_ROOT}/public.sdk")
@@ -114,6 +114,7 @@ add_library(calfnxt_ui STATIC
 target_include_directories(calfnxt_ui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/native
   ${CALFNXT_UPSTREAM}/common/ui
+  ${CALFNXT_UPSTREAM}/common/dsp
   ${VST3_SDK_ROOT}
 )
 target_link_libraries(calfnxt_ui PUBLIC auxvst_native sdk ${CMAKE_DL_LIBS})
@@ -152,7 +153,7 @@ list(APPEND CALFNXT_UI_SRC_DEPS
 set(CALFNXT_PLUGINS
   equalizer stereo transients compressor expander deesser delay reverb
   mbcomp limiter mblimiter harmonics analyzer filter ringmod pulsator
-  crusher phaser flanger chorus split tuner octaver bender impulse
+  crusher phaser flanger chorus split tuner octaver bender impulse tamer
 )
 
 # npm ci once, stamped on the lockfile.

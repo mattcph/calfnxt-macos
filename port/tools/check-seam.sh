@@ -26,7 +26,7 @@ ok()  { echo "[check-seam] ok: $*"; }
 UPSTREAM_KINDS="$(rg -o 'std::strcmp\(kind, "[a-z]+"\)' \
   "$UPSTREAM/common/ui/viz_bin.h" 2>/dev/null | grep -o '"[a-z]*"' | tr -d '"' | sort -u)"
 # Kinds the port bridge alias type accepts.
-PORT_KINDS="$(rg -o "'(levels|unit|spectrum|gains|corr|gonio|envelope|pitch|midi|gr|bandio|point|tempo|shape|hz|ctrl|lfo|response|comb|wave)'" \
+PORT_KINDS="$(rg -o "'(levels|unit|spectrum|gains|corr|gonio|envelope|pitch|midi|gr|bandio|point|tempo|shape|hz|ctrl|lfo|response|comb|ladder|wave|loudness)'" \
   "$PORT/ui/aliases/bridge.ts" 2>/dev/null | tr -d "'" | sort -u)"
 
 for k in $UPSTREAM_KINDS; do

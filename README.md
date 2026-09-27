@@ -59,12 +59,12 @@ calfnxt-macos/
 ```bash
 cd calfnxt-macos/port
 
-make                    # all 25 plugins: UI + DSP + bundle + ad-hoc sign
+make                    # all 26 plugins: UI + DSP + bundle + ad-hoc sign
 make PLUGIN=compressor  # one plugin (fast iterate)
 make install            # copy to ~/Library/Audio/Plug-Ins/VST3
-make check              # seam drift checks + Steinberg validator (all 25)
-make release VERSION=2.3.1.1            # clean rebuild + Developer ID sign → Releases/2.3.1.1/
-make release VERSION=2.3.1.1 NOTARIZE=1 #   + notarize + staple
+make check              # seam drift checks + Steinberg validator (all 26)
+make release VERSION=2.7.0.1            # clean rebuild + Developer ID sign → Releases/2.7.0.1/
+make release VERSION=2.7.0.1 NOTARIZE=1 #   + notarize + staple
 make clean              # remove build output (keep configure)
 make distclean          # remove the whole build tree + UI dist
 ```

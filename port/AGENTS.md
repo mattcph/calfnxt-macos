@@ -63,7 +63,7 @@ When upstream tags a new release:
 ```bash
 make sync-upstream TAG=vX.Y.Z   # bumps the submodule, classifies changes
 make                            # rebuild
-make check                      # seam drift + validator (all 25)
+make check                      # seam drift + validator (all 26)
 ```
 
 `tools/upstream-sync.sh` classifies each changed upstream path as **PORTABLE**
@@ -81,12 +81,12 @@ make check                      # seam drift + validator (all 25)
 ## Build
 
 ```bash
-make                    # all 25 plugins (UI + DSP + bundle + ad-hoc sign)
+make                    # all 26 plugins (UI + DSP + bundle + ad-hoc sign)
 make PLUGIN=compressor  # one plugin
 make install            # ~/Library/Audio/Plug-Ins/VST3
-make check              # seam drift + Steinberg validator (all 25)
-make release VERSION=2.3.1.1            # clean rebuild + Developer ID sign → Releases/2.3.1.1/
-make release VERSION=2.3.1.1 NOTARIZE=1 #   + notarize + staple
+make check              # seam drift + Steinberg validator (all 26)
+make release VERSION=2.7.0.1            # clean rebuild + Developer ID sign → Releases/2.7.0.1/
+make release VERSION=2.7.0.1 NOTARIZE=1 #   + notarize + staple
 ```
 
 Apple Silicon (`arm64`) only, macOS 13+, VST3 only. See `README.md`.

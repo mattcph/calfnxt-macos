@@ -1,6 +1,6 @@
 # Distribute calfNXT plug-ins (macOS VST3)
 
-Applies to all 25 calfNXT bundles built by `port/Makefile`
+Applies to all 26 calfNXT bundles built by `port/Makefile`
 (`calfNXTEqualizer.vst3`, `calfNXTCompressor.vst3`, …).
 
 **Local DAW testing uses ad-hoc signing**: `make -C port install` produces
@@ -51,17 +51,17 @@ make -C port install
 Copy `[.env.local.example](../.env.local.example)` to repo-root `.env.local` and fill in your Developer ID values (gitignored). Then when in repo-root:
 
 ```bash
-make -C port release VERSION=2.3.1.1                # clean rebuild + sign all 25
-make -C port release VERSION=2.3.1.1 NOTARIZE=1     # + notarize + staple all 25
+make -C port release VERSION=2.7.0.1                # clean rebuild + sign all 26
+make -C port release VERSION=2.7.0.1 NOTARIZE=1     # + notarize + staple all 26
 ```
 
-The port version (e.g. `2.3.1.1`) is **required**. It is baked into the
+The port version (e.g. `2.7.0.1`) is **required**. It is baked into the
 bundles (`CFBundleShortVersionString`) and used for the local backup:
 
 ```text
-Releases/2.3.1.1/<Name>.vst3            # versioned backup (repo root, gitignored)
-Releases/calfNXT-macOS-2.3.1.1.zip      # ready to attach to a GitHub Release
-                                        #   unpacks as calfNXT-MacOS-2.3.1.1/<Name>.vst3
+Releases/2.7.0.1/<Name>.vst3            # versioned backup (repo root, gitignored)
+Releases/calfNXT-macOS-2.7.0.1.zip      # ready to attach to a GitHub Release
+                                        #   unpacks as calfNXT-MacOS-2.7.0.1/<Name>.vst3
 ~/Library/Audio/Plug-Ins/VST3/<Name>.vst3  # installed copy
 ```
 
@@ -75,7 +75,7 @@ leftover version from an earlier configure.
 Or call the script directly with Make-style overrides:
 
 ```bash
-port/tools/release.sh 2.3.1.1 --notarize \
+port/tools/release.sh 2.7.0.1 --notarize \
   CODE_SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" \
   NOTARY_PROFILE=com.yourNotaryProfile
 ```
@@ -85,7 +85,7 @@ port/tools/release.sh 2.3.1.1 --notarize \
 ## Verify the signature
 
 ```bash
-BUNDLE=Releases/2.3.1.1/calfNXTEqualizer.vst3
+BUNDLE=Releases/2.7.0.1/calfNXTEqualizer.vst3
 codesign --verify --deep --strict --verbose=2 "$BUNDLE"
 codesign -dv --verbose=4 "$BUNDLE" 2>&1 | grep -E "Authority|TeamIdentifier"
 ```
@@ -94,7 +94,7 @@ Confirm a Developer ID authority and your team id.
 
 ## What the script does
 
-1. Wipes `port/build` (same as `make clean`), then rebuilds all 25 plugins
+1. Wipes `port/build` (same as `make clean`), then rebuilds all 26 plugins
    with `-DCALFNXT_PORT_VERSION=<version>` (no fallback tag).
 2. `codesign --force -s "$CODE_SIGN_IDENTITY" --timestamp --options runtime`
    (hardened runtime + secure timestamp are required by notarization).

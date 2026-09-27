@@ -3,15 +3,15 @@
 # calfNXT macOS — versioned release: clean rebuild, Developer ID sign,
 # notarize + staple, and a versioned local backup.
 #
-#   tools/release.sh 2.3.1.1                  # clean rebuild + sign all 25
-#   tools/release.sh 2.3.1.1 --notarize       # + notarize + staple all 25
-#   make -C port release VERSION=2.3.1.1 NOTARIZE=1
+#   tools/release.sh 2.7.0.1                  # clean rebuild + sign all 26
+#   tools/release.sh 2.7.0.1 --notarize       # + notarize + staple all 26
+#   make -C port release VERSION=2.7.0.1 NOTARIZE=1
 #
-# The version (e.g. 2.3.1.1) is required. It is baked into the bundles
+# The version (e.g. 2.7.0.1) is required. It is baked into the bundles
 # (CFBundleShortVersionString) and used for the backup folder:
 #
-#   Releases/2.3.1.1/<Name>.vst3            # versioned local backup (repo root)
-#   Releases/calfNXT-macOS-2.3.1.1.zip      # ready for a manual GitHub Release
+#   Releases/2.7.0.1/<Name>.vst3            # versioned local backup (repo root)
+#   Releases/calfNXT-macOS-2.7.0.1.zip      # ready for a manual GitHub Release
 #
 # (dist/ is the scratch/test area; Releases/ is the versioned backup.)
 #
@@ -25,7 +25,7 @@
 #                                 store-credentials` — see port/HOWTO-DISTRIBUTE.md)
 #
 # Make-style KEY=VALUE overrides (override .env.local):
-#   tools/release.sh 2.3.1.1 --notarize \
+#   tools/release.sh 2.7.0.1 --notarize \
 #     CODE_SIGN_IDENTITY="Developer ID Application: …" NOTARY_PROFILE=com.calfNXT
 #
 # NOTE: local DAW testing does NOT need this script — `make install` produces
@@ -88,12 +88,12 @@ done
 
 # Ask for the version when interactive; fail when scripted.
 if [ -z "$VERSION" ] && [ -t 0 ]; then
-  read -r -p "Release version (e.g. 2.3.1.1): " VERSION
+  read -r -p "Release version (e.g. 2.7.0.1): " VERSION
 fi
 if [ -z "$VERSION" ]; then
   echo "[calfNXT] ERROR: release version required." >&2
-  echo "          Usage: tools/release.sh 2.3.1.1 [--notarize]" >&2
-  echo "          or:    make -C port release VERSION=2.3.1.1 NOTARIZE=1" >&2
+  echo "          Usage: tools/release.sh 2.7.0.1 [--notarize]" >&2
+  echo "          or:    make -C port release VERSION=2.7.0.1 NOTARIZE=1" >&2
   exit 1
 fi
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
@@ -237,7 +237,7 @@ for bundle in "${BUNDLES[@]}"; do
 done
 
 # Suite zip for a manual GitHub Release (stapled bundles, no Finder junk).
-# Unpacks as calfNXT-MacOS-<version>/, not a dump of 25 bundles in cwd.
+# Unpacks as calfNXT-MacOS-<version>/, not a dump of 26 bundles in cwd.
 rm -f "$DIST_ZIP"
 zip_stage="$(mktemp -d /tmp/calfnxt-dist.XXXXXX)"
 inner="calfNXT-MacOS-$VERSION"

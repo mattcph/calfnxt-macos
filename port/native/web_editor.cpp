@@ -9,6 +9,7 @@
 #include "webview_plugview.h"
 #include "viz_bin.h"
 #include "viz_hz.h"
+#include "spectrum_bins.h"
 
 #include "pluginterfaces/vst/ivstcomponent.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
@@ -410,6 +411,13 @@ bool WebEditor::onWebMessage(const char* json)
     return true;
   }
 
+  if (jsonHasType(json, "meter"))
+  {
+    if (vizSource_)
+      vizSource_->handleMeterCommand(json);
+    return true;
+  }
+
   double idf = 0.0;
   const ParamID id = jsonNumberAfterKey(json, "\"id\"", idf) ? static_cast<ParamID>(idf) : 0;
 
@@ -511,8 +519,9 @@ void WebEditor::flushVizArray(const char* streamId, const char* kind, float* val
 
 // Drains every IVizSource channel into one CNXB batch (base64 into outB64).
 // All calfNXT viz rides this seam — levels, GR, dynamics point, corr, gonio,
-// band gains/io, tempo, shape, cutoff, LFOs, envelope, spectrum, response,
-// comb, pitch, MIDI override, IR wave. Channel set, clamps and layouts mirror
+// band gains/io, tempo, shape, cutoff, LFOs, envelope, spectrum, loudness,
+// response, comb, harmonic ladder, pitch, MIDI override, IR wave. Channel set,
+// clamps and layouts mirror
 // the upstream flushViz (calfnxt/common/ui/web_editor.cpp); keep in sync at
 // upstream-sync time (tools/check-seam.sh covers the kind list).
 void WebEditor::drainViz(std::string& outB64)
@@ -662,28 +671,43 @@ void WebEditor::drainViz(std::string& outB64)
 
     if (const char* spectrumId = vizSource_->vizSpectrumId())
     {
-      // Layout: bins, hold, avg[N], max[N], L[N], R[N] — max 2+4*256
-      constexpr int kMaxSpectrum = 2 + 4 * 256;
+      // Layout: bins, hold, avg[N], max[N], L[N], R[N], optional rms[N]
+      constexpr int kMaxSpectrum = 2 + 5 * Dsp::kMaxSpectrumBins;
       float spectrum[kMaxSpectrum];
       const int nSpec = vizSource_->takeSpectrum(spectrum, kMaxSpectrum);
       if (nSpec >= 2)
       {
-        spectrum[0] = std::clamp(spectrum[0], 1.f, 256.f);
+        spectrum[0] = std::clamp(spectrum[0], 1.f, float(Dsp::kMaxSpectrumBins));
         spectrum[1] = spectrum[1] >= 0.5f ? 1.f : 0.f;
         sanitizeInPlace(spectrum + 2, nSpec - 2, -120.f, 12.f, -120.f);
         flushVizArray(spectrumId, "spectrum", spectrum, nSpec);
       }
     }
 
+    if (const char* loudId = vizSource_->vizLoudnessId())
+    {
+      float loud[8 + 4 * 160] {};
+      const int nLoud = vizSource_->takeLoudness(loud, 8 + 4 * 160);
+      if (nLoud > 0)
+      {
+        for (int i = 0; i < nLoud; ++i)
+        {
+          if (!std::isfinite(loud[i]))
+            loud[i] = -200.f;
+        }
+        flushVizArray(loudId, "loudness", loud, nLoud);
+      }
+    }
+
     if (const char* respId = vizSource_->vizFreqResponseId())
     {
-      // Layout: bins, L[N], R[N] — max 1+2*512 (modulation response)
-      constexpr int kMaxResp = 1 + 2 * 512;
+      // Layout: bins, L[N], R[N]
+      constexpr int kMaxResp = 1 + 2 * Dsp::kMaxSpectrumBins;
       float resp[kMaxResp];
       const int nResp = vizSource_->takeFreqResponse(resp, kMaxResp);
       if (nResp >= 1)
       {
-        resp[0] = std::clamp(resp[0], 1.f, 512.f);
+        resp[0] = std::clamp(resp[0], 1.f, float(Dsp::kMaxSpectrumBins));
         sanitizeInPlace(resp + 1, nResp - 1, -96.f, 48.f, -96.f);
         flushVizArray(respId, "response", resp, nResp);
       }
@@ -715,6 +739,39 @@ void WebEditor::drainViz(std::string& outB64)
             comb[i] = isFreq ? std::clamp(v, 20.f, 20000.f) : std::clamp(v, -96.f, 48.f);
           }
           flushVizArray(combId, "comb", comb, need);
+        }
+      }
+    }
+
+    if (const char* ladderId = vizSource_->vizHarmonicGuidesId())
+    {
+      // Layout: n, keep, (centerHz, halfWidthHz)×n — max 48 rungs
+      constexpr int kMaxRungs = 48;
+      constexpr int kMaxLadder = 2 + 2 * kMaxRungs;
+      float ladder[kMaxLadder];
+      const int nLadder = vizSource_->takeHarmonicGuides(ladder, kMaxLadder);
+      if (nLadder >= 2)
+      {
+        int n = static_cast<int>(std::lround(std::clamp(ladder[0], 0.f, float(kMaxRungs))));
+        const int need = 2 + 2 * n;
+        if (nLadder >= need)
+        {
+          ladder[0] = static_cast<float>(n);
+          if (!std::isfinite(ladder[1]))
+            ladder[1] = 0.f;
+          ladder[1] = std::clamp(ladder[1], 0.f, 1.f);
+          for (int i = 2; i < need; ++i)
+          {
+            float v = ladder[i];
+            if (!std::isfinite(v))
+              v = (i & 1) ? 20.f : 100.f;
+            // Even: center Hz; odd: ±halfWidth Hz (sign = boom vs protect).
+            if (((i - 2) & 1) == 0)
+              ladder[i] = std::clamp(v, 20.f, 20000.f);
+            else
+              ladder[i] = std::clamp(v, -5000.f, 5000.f);
+          }
+          flushVizArray(ladderId, "ladder", ladder, need);
         }
       }
     }

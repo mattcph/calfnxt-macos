@@ -59,7 +59,7 @@ visualization.
 - **Apple Silicon only** (deployment target macOS 13).
 - **VST3 only.**
 - **One build process.** A single `Makefile` over one CMake superbuild builds
-the SDK once, all 25 DSP targets, and all per-plugin UI packs. `make`,
+the SDK once, all 26 DSP targets, and all per-plugin UI packs. `make`,
 `make PLUGIN=compressor`, `make install`, `make check`.
 - **React glue is port-owned.** `ui/react-aux/` implements the React ↔ AUX
 bindings over AWML `Bindings`/`DynamicValue`, wired in by a Vite alias.
@@ -81,7 +81,7 @@ Requires the VST3 SDK submodule at `../vst3sdk` and the upstream submodule
 checked out (`git submodule update --init --recursive` from the repo root).
 
 ```bash
-make                    # all 25 plugins: UI + DSP + bundle + ad-hoc sign
+make                    # all 26 plugins: UI + DSP + bundle + ad-hoc sign
 make PLUGIN=compressor  # one plugin
 make install            # copy to ~/Library/Audio/Plug-Ins/VST3
 make check              # seam drift checks + Steinberg validator (all plugins)
