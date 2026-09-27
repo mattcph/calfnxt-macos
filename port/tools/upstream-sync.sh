@@ -25,9 +25,71 @@ NEW="$(git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)"
 echo "now at: $NEW"
 echo
 
+# --- Reapply the patch queue ------------------------------------------------
+# Apply a patch only when the tag still has the old behavior. Verbatim
+# presence and a rewrite that already does the job are both "not needed".
+# A queue file with no predicate below is reapplied when it applies cleanly.
+patch_still_needed() {
+  local base
+  base="$(basename "$1")"
+  case "$base" in
+    0004-*)
+      grep -q 'Library/Application Support/calfNXT' \
+        "$UPSTREAM/dsp/impulse/source/impulse_dsp.cpp" && return 1
+      return 0
+      ;;
+    0005-*)
+      # Present once process() reads 64-bit buffers, including a rewrite.
+      grep -q 'channelBuffers64' \
+        "$UPSTREAM/dsp/tamer/source/tamer_dsp.cpp" && return 1
+      return 0
+      ;;
+    0006-*)
+      grep -q 'channelBuffers64' \
+        "$UPSTREAM/dsp/crusher/source/crusher_dsp.cpp" && return 1
+      return 0
+      ;;
+    *)
+      return 2
+      ;;
+  esac
+}
+
+echo "== patch queue =="
+reapplied=0
+shopt -s nullglob
+for patch in "$PORT_DIR"/patches/*.patch; do
+  name="$(basename "$patch")"
+  if git apply --reverse --check "$patch" >/dev/null 2>&1; then
+    echo "  $name: already in $TAG (verbatim), left in the queue"
+    continue
+  fi
+  need=0
+  patch_still_needed "$patch" || need=$?
+  if [ "$need" -eq 1 ]; then
+    echo "  $name: not needed (upstream already has this behavior), left in the queue"
+    continue
+  fi
+  if git apply --check "$patch" >/dev/null 2>&1; then
+    git am --quiet "$patch"
+    echo "  $name: reapplied"
+    reapplied=1
+    continue
+  fi
+  if [ "$need" -eq 2 ]; then
+    echo "  $name: no still-needed check, and the hunks do not apply." >&2
+    echo "  Add a predicate in tools/upstream-sync.sh or rebase the patch." >&2
+    exit 1
+  fi
+  echo "  $name: still needed, but the hunks no longer match." >&2
+  echo "  Rebase that file by hand, replace the patch, and rerun sync." >&2
+  exit 1
+done
+echo
+
 # --- Classify changed paths -------------------------------------------------
 CHANGED="$(git diff --name-only "$OLD" "$NEW" 2>/dev/null || true)"
-if [ -z "$CHANGED" ]; then
+if [ -z "$CHANGED" ] && [ "$reapplied" -eq 0 ]; then
   echo "no changes between $OLD and $NEW"
   exit 0
 fi

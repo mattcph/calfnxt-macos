@@ -13,7 +13,7 @@ platform layer is the port's. GPL-3.0-or-later throughout.
 
 **The upstream submodule stays zero-diff.** Everything macOS-specific lives in
 the overlay (`calfnxt-macos/port/`). If a change needs to touch upstream, it goes
-through the `patches/` queue and a PR to Markus.
+through the `patches/` queue and a GitHub PR.
 
 - **Upstream (read-only):** `../calfnxt/`: DSP,
   `*.plugin.json` descriptors, React/AUX UI sources, upstream codegen.
@@ -66,9 +66,15 @@ make                            # rebuild
 make check                      # seam drift + validator (all 26)
 ```
 
-`tools/upstream-sync.sh` classifies each changed upstream path as **PORTABLE**
-(take it: DSP, UI, descriptors), **SEAM** (review against the overlay), or
-**IGNORED** (Linux-only: web_host, GTK, X11). Then re-run the seam checks.
+`tools/upstream-sync.sh` checks out the tag, then walks `patches/` in order.
+A patch is reapplied only when it is still needed: 0004 when `configDir()`
+has no macOS library path, 0005 and 0006 when that DSP file still has no
+`channelBuffers64` read. A rewrite that already does the job is skipped and
+the patch file is left in place. Sync stops when the old behavior remains
+and the hunks no longer fit. It then classifies each changed upstream path
+as **PORTABLE** (take it: DSP, UI, descriptors), **SEAM** (review against
+the overlay), or **IGNORED** (Linux-only: web_host, GTK, X11), and re-runs
+the seam checks.
 
 ## Never reintroduce
 

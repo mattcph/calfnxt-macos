@@ -87,8 +87,9 @@ Inspect Element) and the per-tick viz dump (`window.__calfnxtDumpViz()`).
 
 ## Known limitations (by design, this release)
 
-- Shipped binaries are pristine upstream **v2.7.0**. The dynamics and Impulse
-  realtime-safety work landed upstream in 2.4.0.
+- Shipped binaries are upstream **v2.7.0** plus local patches 0005 (Tamer) and
+  0006 (Crusher) for 64-bit processing, until those land upstream. The dynamics
+  and Impulse realtime-safety work landed upstream in 2.4.0.
 - Impulse's default library dir is `~/.config/calfnxt` (Linux-style) until
   patch 0004 lands upstream.
 - Mono bus arrangements are rejected by upstream `setBusArrangements`; the
