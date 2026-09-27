@@ -1,0 +1,136 @@
+From e7ba87e2d9c10ab719b5714946a1c4831205ebe5 Mon Sep 17 00:00:00 2001
+From: Matt Hardy <matt@deuso.de>
+Date: Sun, 27 Sep 2026 21:14:15 +0200
+Subject: [PATCH] tamer: run the STFT when the host processes in 64-bit.
+
+Reaper sends 64-bit samples. canProcessSampleSize accepts them and
+IoStage already copies and meters, but process() returned before the
+STFT, so the graph stayed at the floor.
+---
+ dsp/tamer/source/tamer_dsp.cpp | 70 +++++++++++++++++++++++++++++-----
+ dsp/tamer/source/tamer_dsp.h   |  5 +++
+ 2 files changed, 65 insertions(+), 10 deletions(-)
+
+diff --git a/dsp/tamer/source/tamer_dsp.cpp b/dsp/tamer/source/tamer_dsp.cpp
+index 9251d2c..b3c9ee9 100644
+--- a/dsp/tamer/source/tamer_dsp.cpp
++++ b/dsp/tamer/source/tamer_dsp.cpp
+@@ -85,6 +85,12 @@ tresult PLUGIN_API TamerPlugin::setupProcessing(ProcessSetup& newSetup)
+ {
+   sampleRate_ = newSetup.sampleRate > 0.0 ? newSetup.sampleRate : 44100.0;
+   tamer_.setSampleRate(sampleRate_);
++  const int cap = std::max(64, static_cast<int>(newSetup.maxSamplesPerBlock));
++  if (cap != blockCap_)
++  {
++    blockScratch_.assign(static_cast<size_t>(cap) * 2, 0.f);
++    blockCap_ = cap;
++  }
+   resetProcessing();
+   return EffectBase::setupProcessing(newSetup);
+ }
+@@ -137,16 +143,33 @@ tresult PLUGIN_API TamerPlugin::process(ProcessData& data)
+     return kResultOk;
+   }
+ 
+-  auto** outs = data.outputs[0].channelBuffers32;
+-  if (!outs || data.symbolicSampleSize != kSample32)
++  const int32 nCh = data.outputs[0].numChannels;
++  const bool is64 = data.symbolicSampleSize != kSample32;
++  float* left = nullptr;
++  float* right = nullptr;
++  double** outs64 = nullptr;
++  if (!is64)
+   {
+-    io_.end(data);
+-    return kResultOk;
++    auto** outs32 = data.outputs[0].channelBuffers32;
++    if (!outs32 || !outs32[0])
++    {
++      io_.end(data);
++      return kResultOk;
++    }
++    left = outs32[0];
++    right = (nCh > 1 && outs32[1]) ? outs32[1] : nullptr;
++  }
++  else
++  {
++    outs64 = data.outputs[0].channelBuffers64;
++    if (!outs64 || !outs64[0] || blockCap_ < 1)
++    {
++      io_.end(data);
++      return kResultOk;
++    }
++    left = blockScratch_.data();
++    right = (nCh > 1 && outs64[1]) ? left + blockCap_ : nullptr;
+   }
+-
+-  const int32 nCh = data.outputs[0].numChannels;
+-  float* left = outs[0];
+-  float* right = (nCh > 1 && outs[1]) ? outs[1] : nullptr;
+ 
+   const bool quiet = io_.inputWasQuiet();
+   const bool depthOn = state.depth > 1.0e-3f;
+@@ -170,8 +193,35 @@ tresult PLUGIN_API TamerPlugin::process(ProcessData& data)
+     return kResultOk;
+   }
+ 
+-  tamer_.process(left, right, nFrames, state.bypass, state.diffListen, runStft,
+-                 state.channel);
++  if (!is64)
++  {
++    tamer_.process(left, right, nFrames, state.bypass, state.diffListen, runStft,
++                   state.channel);
++  }
++  else
++  {
++    for (int32 done = 0; done < nFrames;)
++    {
++      const int32 n = std::min(blockCap_, nFrames - done);
++      for (int32 i = 0; i < n; ++i)
++        left[i] = static_cast<float>(outs64[0][done + i]);
++      if (right)
++      {
++        for (int32 i = 0; i < n; ++i)
++          right[i] = static_cast<float>(outs64[1][done + i]);
++      }
++      tamer_.process(left, right, n, state.bypass, state.diffListen, runStft,
++                     state.channel);
++      for (int32 i = 0; i < n; ++i)
++        outs64[0][done + i] = left[i];
++      if (right)
++      {
++        for (int32 i = 0; i < n; ++i)
++          outs64[1][done + i] = right[i];
++      }
++      done += n;
++    }
++  }
+ 
+   if (wantViz)
+     tamer_.publish();
+diff --git a/dsp/tamer/source/tamer_dsp.h b/dsp/tamer/source/tamer_dsp.h
+index d9d00b1..dc8590b 100644
+--- a/dsp/tamer/source/tamer_dsp.h
++++ b/dsp/tamer/source/tamer_dsp.h
+@@ -8,6 +8,8 @@
+ 
+ #include "tamer_params.h"
+ 
++#include <vector>
++
+ namespace calfNXT {
+ namespace Tamer {
+ 
+@@ -80,6 +82,9 @@ private:
+   Steinberg::uint32 latencySamples_ = 0;
+   /** Samples left to drain wet/OLA after input goes quiet before parking STFT. */
+   int flushLeft_ = 0;
++  /** Float scratch for hosts that process in 64-bit (one block, L then R). */
++  std::vector<float> blockScratch_;
++  int blockCap_ = 0;
+ };
+ 
+ } // namespace Tamer
+-- 
+2.54.0 (Apple Git-157)
+
