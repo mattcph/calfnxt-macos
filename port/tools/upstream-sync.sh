@@ -38,17 +38,6 @@ patch_still_needed() {
         "$UPSTREAM/dsp/impulse/source/impulse_dsp.cpp" && return 1
       return 0
       ;;
-    0005-*)
-      # Present once process() reads 64-bit buffers, including a rewrite.
-      grep -q 'channelBuffers64' \
-        "$UPSTREAM/dsp/tamer/source/tamer_dsp.cpp" && return 1
-      return 0
-      ;;
-    0006-*)
-      grep -q 'channelBuffers64' \
-        "$UPSTREAM/dsp/crusher/source/crusher_dsp.cpp" && return 1
-      return 0
-      ;;
     *)
       return 2
       ;;

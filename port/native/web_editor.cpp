@@ -685,10 +685,26 @@ void WebEditor::drainViz(std::string& outB64)
       }
     }
 
+    if (const char* spectrumOutId = vizSource_->vizOutputSpectrumId())
+    {
+      // Same layout as the input spectrum (Equalizer, Filter, multiband fft_out).
+      constexpr int kMaxSpectrum = 2 + 5 * Dsp::kMaxSpectrumBins;
+      float spectrum[kMaxSpectrum];
+      const int nSpec = vizSource_->takeOutputSpectrum(spectrum, kMaxSpectrum);
+      if (nSpec >= 2)
+      {
+        spectrum[0] = std::clamp(spectrum[0], 1.f, float(Dsp::kMaxSpectrumBins));
+        spectrum[1] = spectrum[1] >= 0.5f ? 1.f : 0.f;
+        sanitizeInPlace(spectrum + 2, nSpec - 2, -120.f, 12.f, -120.f);
+        flushVizArray(spectrumOutId, "spectrum", spectrum, nSpec);
+      }
+    }
+
     if (const char* loudId = vizSource_->vizLoudnessId())
     {
-      float loud[8 + 4 * 160] {};
-      const int nLoud = vizSource_->takeLoudness(loud, 8 + 4 * 160);
+      // Match LoudnessMeter::kVizFloats + 4 * kHistCap (12 s @ 40 Hz).
+      float loud[21 + 4 * 480] {};
+      const int nLoud = vizSource_->takeLoudness(loud, 21 + 4 * 480);
       if (nLoud > 0)
       {
         for (int i = 0; i < nLoud; ++i)
@@ -789,8 +805,9 @@ void WebEditor::drainViz(std::string& outB64)
 
     if (const char* lfoId = vizSource_->vizLfoActivityId())
     {
-      float act[2] {};
-      const int n = vizSource_->takeLfoActivity(act, 2);
+      // Expander: 5 slots (amt×2 + peak-unit×3); ringmod LFO: 2.
+      float act[8] {};
+      const int n = vizSource_->takeLfoActivity(act, 8);
       if (n >= 1)
       {
         sanitizeInPlace(act, n, 0.f, 1.f, 0.f);

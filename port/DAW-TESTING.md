@@ -76,20 +76,23 @@ Inspect Element) and the per-tick viz dump (`window.__calfnxtDumpViz()`).
   chunk) and the library root is remembered for next time
   (`~/.config/calfnxt/impulse-library` until upstream merges patch 0004).
 
-## 8. 2.7.0 surfaces
+## 8. 2.10.0 surfaces
 
-- [ ] **Tamer** (`calfNXTTamer`) opens, the resonance chart draws, and the
-  harmonic-protect guides move with the harmonics control.
-- [ ] **Analyzer** loudness block (M/S/I, true peak) moves with program, and
-  Reset / Reset Peak clear the integrated and latched values.
-- [ ] **Equalizer** and **Compressor** channel mode (Stereo / L / R / Mid /
-  Side) changes which path is processed; Listen solos that path.
+- [ ] **Equalizer** or **Multiband** output spectrum (`fft_out`) moves with the
+  processed signal, not only the input.
+- [ ] **Analyzer** loudness block (M/S/I, true peak) moves with program, Reset /
+  Reset Peak clear the integrated and latched values, and the loudness history
+  scrolls.
+- [ ] **Expander** inverse-link meters move when Inv is in use.
+- [ ] One dynamics plugin or **Crusher** history chart scrolls with program.
+- [ ] **Tamer** resonance chart draws, and the harmonic-protect guides move
+  with the harmonics control.
 
 ## Known limitations (by design, this release)
 
-- Shipped binaries are upstream **v2.7.0** plus local patches 0005 (Tamer) and
-  0006 (Crusher) for 64-bit processing, until those land upstream. The dynamics
-  and Impulse realtime-safety work landed upstream in 2.4.0.
+- Shipped binaries are upstream **v2.10.0** plus local patch 0004 (Impulse
+  macOS library path). Tamer and Crusher 64-bit processing landed upstream in
+  2.10.0. The dynamics and Impulse realtime-safety work landed upstream in 2.4.0.
 - Impulse's default library dir is `~/.config/calfnxt` (Linux-style) until
   patch 0004 lands upstream.
 - Mono bus arrangements are rejected by upstream `setBusArrangements`; the

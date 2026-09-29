@@ -12,12 +12,12 @@
 #   make dsp                  # DSP targets only
 #   make install              # copy bundles to ~/Library/Audio/Plug-Ins/VST3
 #   make check                # validator + seam drift checks
-#   make release VERSION=2.7.0.1            # clean rebuild + Developer ID sign → Releases/2.7.0.1/
-#   make release VERSION=2.7.0.1 NOTARIZE=1 #   + notarize + staple (see HOWTO-DISTRIBUTE.md)
+#   make release VERSION=2.10.0.1            # clean rebuild + Developer ID sign → Releases/2.10.0.1/
+#   make release VERSION=2.10.0.1 NOTARIZE=1 #   + notarize + staple (see HOWTO-DISTRIBUTE.md)
 #   make sync-upstream TAG=vX.Y.Z
 #   make clean | distclean
 #
-# Variables: CONFIG=Release|Debug  PLUGIN=<id>  JOBS=<n>  NOTARIZE=1  VERSION=2.7.0.1
+# Variables: CONFIG=Release|Debug  PLUGIN=<id>  JOBS=<n>  NOTARIZE=1  VERSION=2.10.0.1
 # Release credentials: CODE_SIGN_IDENTITY / DEVELOPMENT_TEAM / NOTARY_PROFILE
 # (usually via repo-root .env.local — see .env.local.example)
 
