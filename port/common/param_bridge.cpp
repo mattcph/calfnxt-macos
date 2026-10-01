@@ -34,8 +34,15 @@ void appendNum (std::string& out, double v)
 ParamBridge::ParamBridge (EditController* c, std::vector<ParamID> cat)
 : controller (c), catalog (std::move (cat))
 {
-	current.assign (catalog.size (), 0.0);
-	dirty.assign (catalog.size (), false);
+	// C++17 std::atomic default-init does not zero the value. Allocated once;
+	// the catalog does not grow, and atomics are not movable.
+	current = std::make_unique<std::atomic<double>[]> (catalog.size ());
+	dirty = std::make_unique<std::atomic<bool>[]> (catalog.size ());
+	for (size_t i = 0; i < catalog.size (); ++i)
+	{
+		current[i].store (0.0, std::memory_order_relaxed);
+		dirty[i].store (false, std::memory_order_relaxed);
+	}
 	idToIndex.reserve (catalog.size ());
 	for (size_t i = 0; i < catalog.size (); ++i)
 		idToIndex.emplace (catalog[i], static_cast<int> (i));
@@ -61,8 +68,8 @@ int ParamBridge::indexOf (ParamID id) const
 //------------------------------------------------------------------------
 bool ParamBridge::anyDirty () const
 {
-	for (bool d : dirty)
-		if (d)
+	for (size_t i = 0; i < catalog.size (); ++i)
+		if (dirty[i].load (std::memory_order_acquire))
 			return true;
 	// Products with an array telemetry seam (calfNXT) produce viz frames
 	// continuously while the editor is visible; the drain self-throttles to
@@ -121,12 +128,15 @@ void ParamBridge::onReady ()
 //------------------------------------------------------------------------
 void ParamBridge::onParamChanged (ParamID id, double value)
 {
+	// Audio thread (process → setNormalized → update) and the main thread both
+	// arrive here. Lock-free stores only — the timer is main-thread-owned and
+	// already running once the editor handshake completes.
 	int idx = indexOf (id);
 	if (idx < 0)
 		return;
-	current[static_cast<size_t> (idx)] = value;
-	dirty[static_cast<size_t> (idx)] = true;
-	ensureTimer ();
+	const auto i = static_cast<size_t> (idx);
+	current[i].store (value, std::memory_order_relaxed);
+	dirty[i].store (true, std::memory_order_release);
 }
 
 //------------------------------------------------------------------------
@@ -143,9 +153,9 @@ void ParamBridge::flush ()
 		return;
 
 	bool anyParam = false;
-	for (bool d : dirty)
+	for (size_t i = 0; i < catalog.size (); ++i)
 	{
-		if (d)
+		if (dirty[i].load (std::memory_order_acquire))
 		{
 			anyParam = true;
 			break;
@@ -158,19 +168,24 @@ void ParamBridge::flush ()
 		bool first = true;
 		for (size_t i = 0; i < catalog.size (); ++i)
 		{
-			if (!dirty[i])
+			// Clear before reading. exchange is one RMW: a writer that stores a
+			// newer value and sets dirty after this point is not lost. Either
+			// this load sees that value, or dirty stays true and the next tick
+			// sends it (a duplicate at worst).
+			if (!dirty[i].exchange (false, std::memory_order_acq_rel))
 				continue;
-			dirty[i] = false;
+			const double value = current[i].load (std::memory_order_relaxed);
 			if (!first)
 				jsScratch += ',';
 			first = false;
 			jsScratch += '"';
 			jsScratch += std::to_string (catalog[i]);
 			jsScratch += "\":";
-			appendNum (jsScratch, current[i]);
+			appendNum (jsScratch, value);
 		}
 		jsScratch += "}});";
-		transport->evalJS (jsScratch);
+		if (!first)
+			transport->evalJS (jsScratch);
 	}
 
 	// Array telemetry seam: one CNXB batch per tick, after params. The product

@@ -94,7 +94,9 @@ private:
   void* plugView_ = nullptr;                      // WebViewPlugView*, owned
 
   bool listeningParams_ = false;
-  bool suppressParamPush_ = false;
+  /** Set around a UI-originated setParamNormalized so its echo is not pushed
+      back. Read from update(), which also runs on the audio thread. */
+  std::atomic<bool> suppressParamPush_ {false};
   bool pageReady_ = false;
   /** Mouse is down in the WebView; sets during this window are bracketed. */
   bool gestureMouseDown_ = false;

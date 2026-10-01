@@ -21,6 +21,7 @@ base64 binary frames the other.
 
 The calfNXT-macos port runs the editor **in process**. Each plugin hosts a **WKWebView**
 directly on its `NSView`, and parameters flow through the auxVST **ParamBridge** (found at `common/param_bridge.cpp`).
+Host-to-UI updates are push-only: the bridge stores a plain value when `setNormalized` notifies dependents, and does not poll the controller on each tick the way the Linux editor does.
 
 
 |                          | upstream (Linux)                          | this port (macOS)                                          |

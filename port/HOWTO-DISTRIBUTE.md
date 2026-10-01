@@ -51,17 +51,17 @@ make -C port install
 Copy `[.env.local.example](../.env.local.example)` to repo-root `.env.local` and fill in your Developer ID values (gitignored). Then when in repo-root:
 
 ```bash
-make -C port release VERSION=2.10.0.1                # clean rebuild + sign all 26
-make -C port release VERSION=2.10.0.1 NOTARIZE=1     # + notarize + staple all 26
+make -C port release VERSION=2.12.3.1                # clean rebuild + sign all 26
+make -C port release VERSION=2.12.3.1 NOTARIZE=1     # + notarize + staple all 26
 ```
 
-The port version (e.g. `2.10.0.1`) is **required**. It is baked into the
+The port version (e.g. `2.12.3.1`) is **required**. It is baked into the
 bundles (`CFBundleShortVersionString`) and used for the local backup:
 
 ```text
-Releases/2.10.0.1/<Name>.vst3            # versioned backup (repo root, gitignored)
-Releases/calfNXT-macOS-2.10.0.1.zip      # ready to attach to a GitHub Release
-                                        #   unpacks as calfNXT-MacOS-2.10.0.1/<Name>.vst3
+Releases/2.12.3.1/<Name>.vst3            # versioned backup (repo root, gitignored)
+Releases/calfNXT-macOS-2.12.3.1.zip      # ready to attach to a GitHub Release
+                                        #   unpacks as calfNXT-MacOS-2.12.3.1/<Name>.vst3
 ~/Library/Audio/Plug-Ins/VST3/<Name>.vst3  # installed copy
 ```
 
@@ -75,7 +75,7 @@ leftover version from an earlier configure.
 Or call the script directly with Make-style overrides:
 
 ```bash
-port/tools/release.sh 2.10.0.1 --notarize \
+port/tools/release.sh 2.12.3.1 --notarize \
   CODE_SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" \
   NOTARY_PROFILE=com.yourNotaryProfile
 ```
@@ -85,7 +85,7 @@ port/tools/release.sh 2.10.0.1 --notarize \
 ## Verify the signature
 
 ```bash
-BUNDLE=Releases/2.10.0.1/calfNXTEqualizer.vst3
+BUNDLE=Releases/2.12.3.1/calfNXTEqualizer.vst3
 codesign --verify --deep --strict --verbose=2 "$BUNDLE"
 codesign -dv --verbose=4 "$BUNDLE" 2>&1 | grep -E "Authority|TeamIdentifier"
 ```

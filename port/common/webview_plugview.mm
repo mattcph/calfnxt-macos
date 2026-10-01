@@ -541,6 +541,10 @@ void WebViewPlugView::evalJS (const std::string& js)
 	void (^run)(void) = ^{
 		[state.webView evaluateJavaScript:code completionHandler:nil];
 	};
+	// ParamBridge::flush runs on Steinberg's timer, added with
+	// CFRunLoopAddTimer(CFRunLoopGetMain(), …), so that call is already on
+	// the main thread and evaluateJavaScript runs directly. dispatch_async
+	// stays for any caller that is not on the main thread.
 	if ([NSThread isMainThread])
 		run ();
 	else

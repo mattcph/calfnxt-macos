@@ -107,10 +107,14 @@ printf '  %s\n' "${portable[@]:0:20}"
 [ "${#portable[@]}" -gt 20 ] && echo "  … and $(( ${#portable[@]} - 20 )) more"
 echo
 echo "SEAM (review vs overlay): ${#seam[@]}"
-printf '  %s\n' "${seam[@]}"
+if [ "${#seam[@]}" -gt 0 ]; then
+  printf '  %s\n' "${seam[@]}"
+fi
 echo
 echo "IGNORED (Linux-only):     ${#ignored[@]}"
-printf '  %s\n' "${ignored[@]}"
+if [ "${#ignored[@]}" -gt 0 ]; then
+  printf '  %s\n' "${ignored[@]}"
+fi
 echo
 
 # --- Seam drift checks + rebuild --------------------------------------------

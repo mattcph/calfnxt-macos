@@ -74,26 +74,40 @@ Inspect Element) and the per-tick viz dump (`window.__calfnxtDumpViz()`).
   the waveform draws, predelay/length handles work.
 - [ ] Save/reopen the project: the IR is restored (embedded in the session
   chunk) and the library root is remembered for next time
-  (`~/.config/calfnxt/impulse-library` until upstream merges patch 0004).
+  (`~/Library/Application Support/calfNXT` via local patch 0004).
 
-## 8. 2.10.0 surfaces
+## 8. 2.12.1 surfaces
 
-- [ ] **Equalizer** or **Multiband** output spectrum (`fft_out`) moves with the
-  processed signal, not only the input.
-- [ ] **Analyzer** loudness block (M/S/I, true peak) moves with program, Reset /
-  Reset Peak clear the integrated and latched values, and the loudness history
-  scrolls.
-- [ ] **Expander** inverse-link meters move when Inv is in use.
-- [ ] One dynamics plugin or **Crusher** history chart scrolls with program.
-- [ ] **Tamer** resonance chart draws, and the harmonic-protect guides move
-  with the harmonics control.
+- [ ] **Equalizer** spectrum falls and then clears when the transport stops.
+- [ ] **Equalizer** band gain can be set past ±24 dB (range is ±36 dB, Q to 30).
+- [ ] **Ringmod** shows input and output spectrum, and the editor is the taller
+  1024×580 window.
+- [ ] **Tamer** sidechain bus is available, and the sidechain spectrum moves
+  when Sidechain is on.
+- [ ] **Analyzer** spectrum falls when the signal stops, instead of snapping off.
+
+## 9. 2.12.2 look
+
+- [ ] Knobs read as subtle dents with a slight blue tint. Buttons hover lightly
+  and the bevel lines up with the knobs.
+- [ ] **Equalizer** band frequency labels, **Reverb** HF damp and mod rate, and
+  **Tuner** vibrato rate use the shared Hz readout (at most 6 digits).
+- [ ] **Pulsator** BPM stays one decimal place.
+- [ ] A dynamics chart transfer point has its color and stroke back.
+
+## 10. 2.12.3 realtime
+
+- [ ] **Reverb**, **Tamer**, and **Multiband Limiter** keep playing on 64-bit
+  Reaper. The host does not freeze when these are in the chain.
+- [ ] Hz readouts show at most two decimal places (at most 5 digits).
 
 ## Known limitations (by design, this release)
 
-- Shipped binaries are upstream **v2.10.0** plus local patch 0004 (Impulse
+- Shipped binaries are upstream **v2.12.3** plus local patch 0004 (Impulse
   macOS library path). Tamer and Crusher 64-bit processing landed upstream in
   2.10.0. The dynamics and Impulse realtime-safety work landed upstream in 2.4.0.
-- Impulse's default library dir is `~/.config/calfnxt` (Linux-style) until
-  patch 0004 lands upstream.
+- Impulse's library dir is `~/Library/Application Support/calfNXT` because
+  patch 0004 is applied locally. Upstream still uses `~/.config/calfnxt` until
+  that patch lands.
 - Mono bus arrangements are rejected by upstream `setBusArrangements`; the
   plugin suggests stereo.

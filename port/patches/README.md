@@ -41,7 +41,7 @@ shared `Sample64Scratch`). Dropped on this sync:
 
 ## Submitting (PR artifacts)
 
-The remaining patch applies cleanly to `v2.10.0` (verified with
+The remaining patch applies cleanly to `v2.12.3` (verified with
 `git apply --check`). Submit as a GitHub PR from a fork of
 `github.com/boomshop/calfnxt`, or send the patch file directly (`git am`
 applies it, authorship preserved).
@@ -67,4 +67,4 @@ is treated as still needed.
 
 | Patch | Scope | Status |
 | ----- | ----- | ------ |
-| `0004-impulse-macos-paths.patch` | impulse: `~/Library/Application Support/calfNXT` config dir on macOS; session root fallback to last local library when the stored root doesn't exist (cross-platform sessions) | ready for PR, applied on v2.10.0 |
+| `0004-impulse-macos-paths.patch` | impulse: `~/Library/Application Support/calfNXT` config dir on macOS; session root fallback to last local library when the stored root doesn't exist (cross-platform sessions) | ready for PR, applied on v2.12.3 |

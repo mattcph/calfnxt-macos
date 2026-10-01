@@ -256,7 +256,13 @@ void WebEditor::detachParamListeners()
 
 void PLUGIN_API WebEditor::update(FUnknown* changedUnknown, int32 message)
 {
-  if (suppressParamPush_ || message != IDependent::kChanged || !changedUnknown)
+  // Dual-threaded: the host calls setParamNormalized on the main thread, and
+  // EffectBase::syncParamPlains calls Parameter::setNormalized from process()
+  // on the audio thread. UpdateHandler delivers update() on the calling
+  // thread, so this must stay lock-free (atomics only — no timer, transport,
+  // or allocation).
+  if (suppressParamPush_.load(std::memory_order_relaxed)
+      || message != IDependent::kChanged || !changedUnknown)
     return;
   auto* param = FCast<Parameter>(changedUnknown);
   if (!param)
@@ -451,10 +457,10 @@ bool WebEditor::onWebMessage(const char* json)
         gestureParams_.push_back(id);
       }
       const double norm = p->toNormalized(plain);
-      suppressParamPush_ = true;
+      suppressParamPush_.store(true, std::memory_order_relaxed);
       controller_->setParamNormalized(id, norm);
       controller_->performEdit(id, norm);
-      suppressParamPush_ = false;
+      suppressParamPush_.store(false, std::memory_order_relaxed);
     }
     return true;
   }
@@ -605,8 +611,8 @@ void WebEditor::drainViz(std::string& outB64)
     }
 
     constexpr int kMaxBands = 32;
-    constexpr float kGainMin = -24.f;
-    constexpr float kGainMax = 24.f;
+    constexpr float kGainMin = -36.f;
+    constexpr float kGainMax = 36.f;
     float bandGains[kMaxBands];
     const int nGains = vizSource_->takeBandGainsDb(bandGains, kMaxBands);
     if (nGains > 0)
@@ -676,7 +682,9 @@ void WebEditor::drainViz(std::string& outB64)
       constexpr int kMaxSpectrum = 2 + 5 * Dsp::kMaxSpectrumBins;
       float spectrum[kMaxSpectrum];
       const int nSpec = vizSource_->takeSpectrum(spectrum, kMaxSpectrum);
-      if (nSpec >= 2)
+      if (nSpec < 0)
+        flushVizArray(spectrumId, "spectrum", spectrum, 0);
+      else if (nSpec >= 2)
       {
         spectrum[0] = std::clamp(spectrum[0], 1.f, float(Dsp::kMaxSpectrumBins));
         spectrum[1] = spectrum[1] >= 0.5f ? 1.f : 0.f;
@@ -691,7 +699,9 @@ void WebEditor::drainViz(std::string& outB64)
       constexpr int kMaxSpectrum = 2 + 5 * Dsp::kMaxSpectrumBins;
       float spectrum[kMaxSpectrum];
       const int nSpec = vizSource_->takeOutputSpectrum(spectrum, kMaxSpectrum);
-      if (nSpec >= 2)
+      if (nSpec < 0)
+        flushVizArray(spectrumOutId, "spectrum", spectrum, 0);
+      else if (nSpec >= 2)
       {
         spectrum[0] = std::clamp(spectrum[0], 1.f, float(Dsp::kMaxSpectrumBins));
         spectrum[1] = spectrum[1] >= 0.5f ? 1.f : 0.f;

@@ -6,11 +6,27 @@
 // Product-agnostic: the catalog is supplied by the plug-in controller.
 // Speaks parameters only (id + value + dirty coalescing).
 //
-// Wake-on-dirty: onParamChanged marks slots dirty. Once the editor handshake
-// completes, a long-lived ~16 ms main-thread timer drains coalesced updates
-// into the WebView. Steinberg's Timer has no restart API, so the timer stays
-// alive while the editor is ready and no-ops when nothing is dirty (avoids
-// create/destroy churn).
+// Threading contract:
+//   * onParamChanged may run on the audio thread. calfNXT applies host
+//     automation inside process() via Parameter::setNormalized, and the VST3
+//     UpdateHandler delivers IDependent::update on that same thread. The
+//     audio thread may only do lock-free stores into current/dirty.
+//   * Host→UI is push-only. update() snapshots toPlain(getNormalized()) on
+//     the thread that called setNormalized and stores that plain double.
+//     There is no per-tick poll of the controller. A write reaches the UI
+//     only when it goes through setNormalized, which calls changed() when
+//     the clamped value differs. Automation is seen because
+//     EffectBase::syncParamPlains calls setNormalized from process().
+//     Codegen uses RangeParameter, whose toPlain is linear; the DSP's later
+//     readParamPlains float copy is a separate conversion and is not reused.
+//   * The timer, transport, and jsReady are main-thread-only. The ~16 ms
+//     timer is created when the editor handshake completes and lives until
+//     detach. Steinberg's Timer has no restart API, so it stays alive while
+//     the editor is ready. onTimer calls flush when a parameter is dirty or,
+//     while the editor is visible, when a viz drain is installed.
+//   * anyDirty() scans dirty[] before the viz gate. A visible editor still
+//     walks the catalog when no parameter is dirty; flush() then walks it
+//     again before the exchange loop that publishes current[].
 //------------------------------------------------------------------------
 
 #pragma once
@@ -18,10 +34,17 @@
 #include "pluginterfaces/vst/vsttypes.h"
 #include "base/source/timer.h"
 
+#include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+static_assert (std::atomic<double>::is_always_lock_free,
+               "ParamBridge coalescing must stay lock-free on the audio thread");
+static_assert (std::atomic<bool>::is_always_lock_free,
+               "ParamBridge coalescing must stay lock-free on the audio thread");
 
 namespace Steinberg {
 namespace Vst {
@@ -81,8 +104,12 @@ private:
 
 	std::vector<ParamID> catalog;
 	std::unordered_map<ParamID, int> idToIndex;
-	std::vector<double> current; // parallel to catalog (not ParamID-indexed)
-	std::vector<bool> dirty;
+	// Parallel to catalog (not ParamID-indexed). Written from the audio thread
+	// and drained on the main thread; both are lock-free. A raw array, not
+	// std::vector: atomics are not movable, so vector reallocation cannot
+	// compile, and the catalog never grows after construction.
+	std::unique_ptr<std::atomic<double>[]> current;
+	std::unique_ptr<std::atomic<bool>[]> dirty;
 
 	std::function<void (std::string& outB64)> vizDrain;
 	bool vizActive {true};
