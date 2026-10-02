@@ -99,12 +99,26 @@ Inspect Element) and the per-tick viz dump (`window.__calfnxtDumpViz()`).
 
 - [ ] **Reverb**, **Tamer**, and **Multiband Limiter** keep playing on 64-bit
   Reaper. The host does not freeze when these are in the chain.
+- [ ] Stop the transport with **Tamer** and **Multiband Limiter** open: the
+  resonance chart, and the multiband history / GR / spectrum, fall and then
+  rest. They do not stay on the last frame.
 - [ ] Hz readouts show at most two decimal places (at most 5 digits).
+
+## 11. 2.12.4 look
+
+- [ ] Sea theme is a little brighter. Level meters go hot above 0 dB. Block
+  bevels are gradient fills, and grids and button borders are quieter.
+- [ ] **Chorus** top chart uses lines and labels.
+- [ ] **Compressor**, **De-esser**, **Expander**, and **Pulsator** windows are
+  tall enough that the bottom row is not cut off.
+- [ ] **Tamer** and **Multiband Limiter** match 2.12.3 apart from the version
+  number. Stopping the transport still decays their charts (local patch 0005).
 
 ## Known limitations (by design, this release)
 
-- Shipped binaries are upstream **v2.12.3** plus local patch 0004 (Impulse
-  macOS library path). Tamer and Crusher 64-bit processing landed upstream in
+- Shipped binaries are upstream **v2.12.4** plus local patches 0004 (Impulse
+  macOS library path) and 0005 (Tamer and Multiband Limiter graph decay on
+  transport stop). Tamer and Crusher 64-bit processing landed upstream in
   2.10.0. The dynamics and Impulse realtime-safety work landed upstream in 2.4.0.
 - Impulse's library dir is `~/Library/Application Support/calfNXT` because
   patch 0004 is applied locally. Upstream still uses `~/.config/calfnxt` until

@@ -41,8 +41,8 @@ shared `Sample64Scratch`). Dropped on this sync:
 
 ## Submitting (PR artifacts)
 
-The remaining patch applies cleanly to `v2.12.3` (verified with
-`git apply --check`). Submit as a GitHub PR from a fork of
+The remaining patches were reapplied on `v2.12.4` (`git am` during sync).
+Submit as a GitHub PR from a fork of
 `github.com/boomshop/calfnxt`, or send the patch file directly (`git am`
 applies it, authorship preserved).
 
@@ -50,6 +50,7 @@ On the next sync, a patch is reapplied only when the old behavior is still in
 the tree. `git apply --reverse --check` catches a verbatim landing. Otherwise:
 
 - **0004** — still needed when `configDir()` has no `Library/Application Support/calfNXT`
+- **0005** — still needed when Tamer's silence-flag path has no `vizFloor_` latch (it still returns before publishing a decay frame)
 
 If the hunks no longer match and the check still says the patch is needed,
 sync stops so that one file can be rebased by hand. A new queue file needs its
@@ -62,9 +63,19 @@ is treated as still needed.
    library root that doesn't exist locally (sessions travel across OSes),
    falls back to the last locally used library so the IR tree still
    populates."
+2. **0005** — `tamer, mblimiter: decay graphs on host silence flags`
+   Body: "Transport stop sets silenceFlags and IoStage::begin returns before
+   the host buffers are usable. Equalizer already feeds a full block of
+   silence and publishes until the overlay is at the floor. Tamer returned
+   immediately, so the resonance chart froze. Multiband Limiter advanced each
+   lookahead limiter by one sample per callback and only redrew after
+   isSleeping(), so GR, history, and spectrum sat still and then snapped.
+   Both now step a full block of internal zeros while the editor is open,
+   publish, and park once the display has fallen."
 
 ## Queue
 
 | Patch | Scope | Status |
 | ----- | ----- | ------ |
-| `0004-impulse-macos-paths.patch` | impulse: `~/Library/Application Support/calfNXT` config dir on macOS; session root fallback to last local library when the stored root doesn't exist (cross-platform sessions) | ready for PR, applied on v2.12.3 |
+| `0004-impulse-macos-paths.patch` | impulse: `~/Library/Application Support/calfNXT` config dir on macOS; session root fallback to last local library when the stored root doesn't exist (cross-platform sessions) | ready for PR, reapplied on v2.12.4 |
+| `0005-silence-viz-decay.patch` | tamer + mblimiter: on host silenceFlags, decay spectrum/GR/history over a full block of internal zeros, then park at the floor | ready for PR, reapplied on v2.12.4 |

@@ -1,0 +1,278 @@
+From cda10459d9960931f0fe33a1217dc01df8a27092 Mon Sep 17 00:00:00 2001
+From: Matt Hardy <matt@deuso.de>
+Date: Thu, 1 Oct 2026 22:37:39 +0200
+Subject: [PATCH] tamer, mblimiter: decay graphs on host silence flags
+
+Transport stop sets silenceFlags, so IoStage::begin returns before the
+host buffers are usable. Feed a full block of internal zeros while the
+editor is open, publish the charts, and park once they have fallen.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ common/dsp/spectral_tamer.h            |  27 +++++
+ dsp/mblimiter/source/mblimiter_dsp.cpp | 135 +++++++++++++++++--------
+ dsp/mblimiter/source/mblimiter_dsp.h   |   3 +
+ dsp/tamer/source/tamer_dsp.cpp         |  18 ++++
+ dsp/tamer/source/tamer_dsp.h           |   2 +
+ 5 files changed, 145 insertions(+), 40 deletions(-)
+
+diff --git a/common/dsp/spectral_tamer.h b/common/dsp/spectral_tamer.h
+index 28e7047..63cdbd4 100644
+--- a/common/dsp/spectral_tamer.h
++++ b/common/dsp/spectral_tamer.h
+@@ -563,6 +563,33 @@ public:
+     return need;
+   }
+ 
++  /**
++   * True when the on-screen spectrum and GR have fallen to the floor.
++   * Audio thread only — reads the source traces, not the published copy.
++   */
++  bool displayNearFloor(float marginDb = 1.5f) const
++  {
++    const float lim = kFloorDb + std::max(0.f, marginDb);
++    const int n = bins_;
++    if (n < 1)
++      return true;
++    for (int i = 0; i < n; ++i)
++    {
++      const size_t k = static_cast<size_t>(i);
++      if (k >= avgDb_.size() || k >= maxDb_.size() || k >= lDb_.size()
++          || k >= rDb_.size() || k >= grDisp_.size())
++        return true;
++      if (avgDb_[k] > lim || maxDb_[k] > lim || lDb_[k] > lim || rDb_[k] > lim)
++        return false;
++      if (k < scAvgDb_.size() && scAvgDb_[k] > lim)
++        return false;
++      // GR is ≤ 0 dB. A fraction of a dB is gone on the chart.
++      if (grDisp_[k] < -0.5f)
++        return false;
++    }
++    return true;
++  }
++
+   void publish()
+   {
+     // Same contract as SpectrumTap: never block, never allocate. The macOS
+diff --git a/dsp/mblimiter/source/mblimiter_dsp.cpp b/dsp/mblimiter/source/mblimiter_dsp.cpp
+index f6bfba0..e495e87 100644
+--- a/dsp/mblimiter/source/mblimiter_dsp.cpp
++++ b/dsp/mblimiter/source/mblimiter_dsp.cpp
+@@ -172,6 +172,92 @@ void MblimiterPlugin::idleSanitize(int nFrames)
+   Dsp::sanitizeDenormal(zR);
+ }
+ 
++bool MblimiterPlugin::limitersSleeping() const
++{
++  if (!broadband_.isSleeping())
++    return false;
++  const int bands = numBands();
++  for (int b = 0; b < bands; ++b)
++  {
++    if (!strip_[b].isSleeping())
++      return false;
++  }
++  return true;
++}
++
++void MblimiterPlugin::decaySilenceViz(int32 nFrames, float displayLimit)
++{
++  // Full block, not idleSanitize's one-sample poke. A 100 ms release is
++  // thousands of samples; one sample per callback leaves the chart frozen.
++  if (nFrames <= 0)
++    return;
++
++  applySplitParams();
++  ensureMultiBuffer();
++  float* multiBuf = multiBuf_.empty() ? nullptr : multiBuf_.data();
++  const int bands = numBands();
++
++  for (int32 i = 0; i < nFrames; ++i)
++  {
++    if (multiBuf)
++      strip_[0].pokeMulti(multiBuf, 1.f);
++    float zL = 0.f;
++    float zR = 0.f;
++    for (int b = 0; b < bands; ++b)
++    {
++      float tL = 0.f;
++      float tR = 0.f;
++      strip_[b].process(tL, tR, multiBuf);
++      zL += tL;
++      zR += tR;
++    }
++    broadband_.process(zL, zR, nullptr);
++
++    const float bbAtt = broadband_.attenuation();
++    bbMeter_.process(bbAtt);
++    float deepestLin = 1.f;
++    for (int b = 0; b < bands; ++b)
++    {
++      float safe = strip_[b].attenuation() * bbAtt;
++      if (!(safe > 0.f) || !std::isfinite(safe))
++        safe = 1.f;
++      stripMeter_[b].process(safe);
++      if (safe < deepestLin)
++        deepestLin = safe;
++      lastGrDb_[b] = Dsp::linToDbSafe(safe);
++      histFeedSample(b, 0.f, safe, displayLimit);
++    }
++    overallMeter_.process(deepestLin);
++    for (int b = bands; b < kMaxBands; ++b)
++    {
++      stripMeter_[b].forceZero();
++      lastGrDb_[b] = 0.f;
++    }
++  }
++
++  if (limitersSleeping())
++  {
++    for (int b = 0; b < kMaxBands; ++b)
++    {
++      stripMeter_[b].forceZero();
++      lastGrDb_[b] = 0.f;
++    }
++    bbMeter_.forceZero();
++    overallMeter_.forceZero();
++    lastOutPeak_ = 0.f;
++  }
++
++  if (!spectrumFloor_)
++  {
++    spectrumIn_.feedSilence(nFrames);
++    spectrumOut_.feedSilence(nFrames);
++    spectrumIn_.publish();
++    spectrumOut_.publish();
++    if (spectrumIn_.isDisplayNearFloor() && spectrumOut_.isDisplayNearFloor())
++      spectrumFloor_ = true;
++  }
++}
++
+ uint32_t MblimiterPlugin::latencyForLooks(int stripLat, int bbLat, int os) const
+ {
+   os = std::max(1, os);
+@@ -728,48 +814,17 @@ tresult PLUGIN_API MblimiterPlugin::process(ProcessData& data)
+   const bool hasHostAudio = io_.begin(data);
+   if (!hasHostAudio)
+   {
+-    // Host silenceFlags: outs may be unusable — still scroll history with silence.
+-    idleSanitize(data.numSamples);
+-    bool allSleeping = broadband_.isSleeping();
+-    if (allSleeping)
+-    {
+-      for (int b = 0; b < bands; ++b)
+-      {
+-        if (!strip_[b].isSleeping())
+-        {
+-          allSleeping = false;
+-          break;
+-        }
+-      }
+-    }
+-    const bool xfadeBusy =
+-      bypassXfadePos_ < bypassXfadeLen_ || bypass != bypassOld_;
+-    const bool drained = allSleeping && !xfadeBusy
+-      && lastOutPeak_ < Dsp::IoStage::kQuietPeak;
+-    if (drained)
++    // Host silenceFlags: outs may be unusable. Editor hidden keeps the
++    // one-sample denormal poke. Editor open steps a full block of zeros so
++    // GR, history, and spectrum fall in real time, then parks.
++    const bool parked = spectrumFloor_ && limitersSleeping();
++    if (!vizConsumerActive() || parked)
++      idleSanitize(data.numSamples);
++    else
+     {
+-      bypassOld_ = bypass;
+-      for (int b = 0; b < kMaxBands; ++b)
+-        stripMeter_[b].forceZero();
+-      bbMeter_.forceZero();
+-      overallMeter_.forceZero();
+-      const int32 n = data.numSamples;
+-      for (int32 i = 0; i < n; ++i)
+-      {
+-        for (int b = 0; b < bands; ++b)
+-          histFeedSample(b, 0.f, 1.f, displayLimit);
+-      }
+-      if (vizConsumerActive() && !spectrumFloor_)
+-      {
+-        spectrumIn_.feedSilence(n);
+-        spectrumOut_.feedSilence(n);
+-        spectrumIn_.publish();
+-        spectrumOut_.publish();
+-        if (spectrumIn_.isDisplayNearFloor() && spectrumOut_.isDisplayNearFloor())
+-          spectrumFloor_ = true;
+-      }
++      decaySilenceViz(data.numSamples, displayLimit);
++      publishHistSnapshot();
+     }
+-    publishHistSnapshot();
+     return kResultOk;
+   }
+ 
+diff --git a/dsp/mblimiter/source/mblimiter_dsp.h b/dsp/mblimiter/source/mblimiter_dsp.h
+index 8145069..0efb661 100644
+--- a/dsp/mblimiter/source/mblimiter_dsp.h
++++ b/dsp/mblimiter/source/mblimiter_dsp.h
+@@ -100,6 +100,9 @@ private:
+   void ensureMultiBuffer();
+   /** Light denormal scrub for OS filters when all limiters are sleeping. */
+   void idleSanitize(int nFrames);
++  /** Host silenceFlags, editor open: step limiters and viz by a full block of zeros. */
++  void decaySilenceViz(Steinberg::int32 nFrames, float displayLimit);
++  bool limitersSleeping() const;
+ 
+   float params_[kParamCount] {};
+   Dsp::IoStage io_;
+diff --git a/dsp/tamer/source/tamer_dsp.cpp b/dsp/tamer/source/tamer_dsp.cpp
+index 5aace98..2ca86ea 100644
+--- a/dsp/tamer/source/tamer_dsp.cpp
++++ b/dsp/tamer/source/tamer_dsp.cpp
+@@ -55,6 +55,7 @@ void TamerPlugin::resetProcessing()
+ {
+   tamer_.reset();
+   flushLeft_ = 0;
++  vizFloor_ = false;
+   applyBlockState(makeBlockState());
+   updateLatency();
+ }
+@@ -154,7 +155,24 @@ tresult PLUGIN_API TamerPlugin::process(ProcessData& data)
+ 
+   const bool hasHostAudio = io_.begin(data);
+   if (!hasHostAudio)
++  {
++    // Host silenceFlags: buffers are unusable. Feed a private block of zeros
++    // so an open editor's spectrum and GR fall, then park. Do not write outs.
++    if (vizConsumerActive() && !vizFloor_ && data.numSamples > 0)
++    {
++      const int32 n = data.numSamples;
++      ensureScScratch(n);
++      std::fill_n(scScratchL_.data(), static_cast<size_t>(n), 0.f);
++      std::fill_n(scScratchR_.data(), static_cast<size_t>(n), 0.f);
++      tamer_.process(scScratchL_.data(), scScratchR_.data(), n, state.bypass, false,
++                     true, state.channel, nullptr, nullptr, false, false);
++      tamer_.publish();
++      if (tamer_.displayNearFloor())
++        vizFloor_ = true;
++    }
+     return kResultOk;
++  }
++  vizFloor_ = false;
+ 
+   const int32 nFrames = data.numSamples;
+   if (nFrames <= 0)
+diff --git a/dsp/tamer/source/tamer_dsp.h b/dsp/tamer/source/tamer_dsp.h
+index e853528..ac6acce 100644
+--- a/dsp/tamer/source/tamer_dsp.h
++++ b/dsp/tamer/source/tamer_dsp.h
+@@ -92,6 +92,8 @@ private:
+   Steinberg::uint32 latencySamples_ = 0;
+   /** Samples left to drain wet/OLA after input goes quiet before parking STFT. */
+   int flushLeft_ = 0;
++  /** Host silenceFlags: STFT fed zeros until the chart hit the floor. */
++  bool vizFloor_ = false;
+ };
+ 
+ } // namespace Tamer
+-- 
+2.54.0 (Apple Git-157)
+

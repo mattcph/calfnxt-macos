@@ -38,6 +38,11 @@ patch_still_needed() {
         "$UPSTREAM/dsp/impulse/source/impulse_dsp.cpp" && return 1
       return 0
       ;;
+    0005-*)
+      grep -q 'vizFloor_' \
+        "$UPSTREAM/dsp/tamer/source/tamer_dsp.cpp" && return 1
+      return 0
+      ;;
     *)
       return 2
       ;;

@@ -63,8 +63,8 @@ make                    # all 26 plugins: UI + DSP + bundle + ad-hoc sign
 make PLUGIN=compressor  # one plugin (fast iterate)
 make install            # copy to ~/Library/Audio/Plug-Ins/VST3
 make check              # seam drift checks + Steinberg validator (all 26)
-make release VERSION=2.12.3.1            # clean rebuild + Developer ID sign → Releases/2.12.3.1/
-make release VERSION=2.12.3.1 NOTARIZE=1 #   + notarize + staple
+make release VERSION=2.12.4.1            # clean rebuild + Developer ID sign → Releases/2.12.4.1/
+make release VERSION=2.12.4.1 NOTARIZE=1 #   + notarize + staple
 make clean              # remove build output (keep configure)
 make distclean          # remove the whole build tree + UI dist
 ```
