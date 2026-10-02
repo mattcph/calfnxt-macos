@@ -114,12 +114,21 @@ Inspect Element) and the per-tick viz dump (`window.__calfnxtDumpViz()`).
 - [ ] **Tamer** and **Multiband Limiter** match 2.12.3 apart from the version
   number. Stopping the transport still decays their charts (local patch 0005).
 
+## 12. 2.12.5 multiband
+
+- [ ] **Multiband Compressor** and **Multiband Limiter** strip histories cover
+  about 4 seconds. Gain reduction on a strip can be hidden.
+- [ ] **Multiband Limiter** input and output spectra line up (the input is
+  delayed with the lookahead, so a unity-gain band is not a phantom diff).
+- [ ] Header viz rate: 30 Hz is visibly faster than 25 Hz.
+
 ## Known limitations (by design, this release)
 
-- Shipped binaries are upstream **v2.12.4** plus local patches 0004 (Impulse
-  macOS library path) and 0005 (Tamer and Multiband Limiter graph decay on
-  transport stop). Tamer and Crusher 64-bit processing landed upstream in
-  2.10.0. The dynamics and Impulse realtime-safety work landed upstream in 2.4.0.
+- Shipped binaries are upstream **v2.12.5** plugin changes plus local patches
+  0004 (Impulse macOS library path) and 0005 (Tamer and Multiband Limiter
+  graph decay on transport stop). Tamer and Crusher 64-bit processing landed
+  upstream in 2.10.0. The dynamics and Impulse realtime-safety work landed
+  upstream in 2.4.0.
 - Impulse's library dir is `~/Library/Application Support/calfNXT` because
   patch 0004 is applied locally. Upstream still uses `~/.config/calfnxt` until
   that patch lands.

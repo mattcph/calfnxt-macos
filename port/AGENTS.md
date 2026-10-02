@@ -90,8 +90,8 @@ make                    # all 26 plugins (UI + DSP + bundle + ad-hoc sign)
 make PLUGIN=compressor  # one plugin
 make install            # ~/Library/Audio/Plug-Ins/VST3
 make check              # seam drift + Steinberg validator (all 26)
-make release VERSION=2.12.4.1            # clean rebuild + Developer ID sign → Releases/2.12.4.1/
-make release VERSION=2.12.4.1 NOTARIZE=1 #   + notarize + staple
+make release VERSION=2.12.5.1            # clean rebuild + Developer ID sign → Releases/2.12.5.1/
+make release VERSION=2.12.5.1 NOTARIZE=1 #   + notarize + staple
 ```
 
 Apple Silicon (`arm64`) only, macOS 13+, VST3 only. See `README.md`.

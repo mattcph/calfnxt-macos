@@ -331,6 +331,7 @@ void WebEditor::pushIoChannels()
 void WebEditor::onPageReady()
 {
   pageReady_ = true;
+  vizPhaseMs_ = 0;
   // Start the bridge tick (params coalesce + viz drain); initial values
   // arrive as plain {t:"param"} via pushAllParams below.
   if (bridge_)
@@ -544,13 +545,30 @@ void WebEditor::drainViz(std::string& outB64)
     hz = 5;
   else if (hz > 60)
     hz = 60;
-  const auto minGap = std::chrono::milliseconds(1000 / hz);
-
-  // Envelope tier (envelope / pitch / midi) on its own clock.
-  if (lastEnvVizFlush_.time_since_epoch().count() == 0
-      || now - lastEnvVizFlush_ >= minGap)
+  // The bridge timer pumps every 16 ms. Integer `1000/hz` ms (33 for 30 Hz,
+  // 40 for 25 Hz) both miss the 32 ms tick and fire at 48 ms — same ~21 Hz.
+  // Accumulate the true period and spend it across 2- and 3-tick cadences so
+  // 30/25/20 average the requested rate. Envelope and the main tier share
+  // this gate, matching upstream flushViz.
+  const double periodMs = 1000.0 / static_cast<double>(hz);
+  double dtMs = periodMs;
+  if (lastVizFlush_.time_since_epoch().count() != 0)
   {
-    lastEnvVizFlush_ = now;
+    dtMs = std::chrono::duration<double, std::milli>(now - lastVizFlush_).count();
+    if (dtMs < 0.0)
+      dtMs = 0.0;
+    else if (dtMs > 100.0)
+      dtMs = 100.0;
+  }
+  lastVizFlush_ = now;
+  vizPhaseMs_ += dtMs;
+  if (vizPhaseMs_ < periodMs)
+    return;
+  vizPhaseMs_ -= periodMs;
+  if (vizPhaseMs_ >= periodMs)
+    vizPhaseMs_ = std::fmod(vizPhaseMs_, periodMs);
+
+  {
     constexpr int kMaxEnvFloats = 6 * (512 * 3) + 1;
     float envBuf[kMaxEnvFloats];
     const int nEnv = vizSource_->takeEnvelopeDisplay(envBuf, kMaxEnvFloats);
@@ -578,11 +596,7 @@ void WebEditor::drainViz(std::string& outB64)
     }
   }
 
-  // Main tier: throttled to vizHz.
-  if (lastVizFlush_.time_since_epoch().count() == 0 || now - lastVizFlush_ >= minGap)
   {
-    lastVizFlush_ = now;
-
     if (const char* tempoId = vizSource_->vizTempoId())
     {
       float tempo[2] {};

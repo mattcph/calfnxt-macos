@@ -106,8 +106,8 @@ private:
   bool editorVisible_ = false;
 
   std::chrono::steady_clock::time_point lastVizFlush_ {};
-  /** Envelope/pitch/midi tier has its own clock (mirrors upstream). */
-  std::chrono::steady_clock::time_point lastEnvVizFlush_ {};
+  /** Remainder ms toward the next viz frame (16 ms pump vs 25/30 Hz). */
+  double vizPhaseMs_ = 0;
   /** Accumulates CNXV frames during one flushViz() for a single CNXB send. */
   std::vector<char> vizBatchFrames_;
   std::uint32_t vizBatchCount_ = 0;

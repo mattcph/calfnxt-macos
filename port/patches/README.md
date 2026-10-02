@@ -41,7 +41,8 @@ shared `Sample64Scratch`). Dropped on this sync:
 
 ## Submitting (PR artifacts)
 
-The remaining patches were reapplied on `v2.12.4` (`git am` during sync).
+The remaining patches are still applied on top of the 2.12.5 plugin commits
+(website screenshot and publish commits were not taken).
 Submit as a GitHub PR from a fork of
 `github.com/boomshop/calfnxt`, or send the patch file directly (`git am`
 applies it, authorship preserved).
@@ -77,5 +78,5 @@ is treated as still needed.
 
 | Patch | Scope | Status |
 | ----- | ----- | ------ |
-| `0004-impulse-macos-paths.patch` | impulse: `~/Library/Application Support/calfNXT` config dir on macOS; session root fallback to last local library when the stored root doesn't exist (cross-platform sessions) | ready for PR, reapplied on v2.12.4 |
-| `0005-silence-viz-decay.patch` | tamer + mblimiter: on host silenceFlags, decay spectrum/GR/history over a full block of internal zeros, then park at the floor | ready for PR, reapplied on v2.12.4 |
+| `0004-impulse-macos-paths.patch` | impulse: `~/Library/Application Support/calfNXT` config dir on macOS; session root fallback to last local library when the stored root doesn't exist (cross-platform sessions) | ready for PR, still applied on the 2.12.5 plugin commits |
+| `0005-silence-viz-decay.patch` | tamer + mblimiter: on host silenceFlags, decay spectrum/GR/history over a full block of internal zeros, then park at the floor | ready for PR, still applied on the 2.12.5 plugin commits |

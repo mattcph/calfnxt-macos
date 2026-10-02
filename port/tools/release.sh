@@ -3,15 +3,15 @@
 # calfNXT macOS — versioned release: clean rebuild, Developer ID sign,
 # notarize + staple, and a versioned local backup.
 #
-#   tools/release.sh 2.12.4.1                  # clean rebuild + sign all 26
-#   tools/release.sh 2.12.4.1 --notarize       # + notarize + staple all 26
-#   make -C port release VERSION=2.12.4.1 NOTARIZE=1
+#   tools/release.sh 2.12.5.1                  # clean rebuild + sign all 26
+#   tools/release.sh 2.12.5.1 --notarize       # + notarize + staple all 26
+#   make -C port release VERSION=2.12.5.1 NOTARIZE=1
 #
-# The version (e.g. 2.12.4.1) is required. It is baked into the bundles
+# The version (e.g. 2.12.5.1) is required. It is baked into the bundles
 # (CFBundleShortVersionString) and used for the backup folder:
 #
-#   Releases/2.12.4.1/<Name>.vst3            # versioned local backup (repo root)
-#   Releases/calfNXT-macOS-2.12.4.1.zip      # ready for a manual GitHub Release
+#   Releases/2.12.5.1/<Name>.vst3            # versioned local backup (repo root)
+#   Releases/calfNXT-macOS-2.12.5.1.zip      # ready for a manual GitHub Release
 #
 # (dist/ is the scratch/test area; Releases/ is the versioned backup.)
 #
@@ -25,7 +25,7 @@
 #                                 store-credentials` — see port/HOWTO-DISTRIBUTE.md)
 #
 # Make-style KEY=VALUE overrides (override .env.local):
-#   tools/release.sh 2.12.4.1 --notarize \
+#   tools/release.sh 2.12.5.1 --notarize \
 #     CODE_SIGN_IDENTITY="Developer ID Application: …" NOTARY_PROFILE=com.calfNXT
 #
 # NOTE: local DAW testing does NOT need this script — `make install` produces
@@ -88,12 +88,12 @@ done
 
 # Ask for the version when interactive; fail when scripted.
 if [ -z "$VERSION" ] && [ -t 0 ]; then
-  read -r -p "Release version (e.g. 2.12.4.1): " VERSION
+  read -r -p "Release version (e.g. 2.12.5.1): " VERSION
 fi
 if [ -z "$VERSION" ]; then
   echo "[calfNXT] ERROR: release version required." >&2
-  echo "          Usage: tools/release.sh 2.12.4.1 [--notarize]" >&2
-  echo "          or:    make -C port release VERSION=2.12.4.1 NOTARIZE=1" >&2
+  echo "          Usage: tools/release.sh 2.12.5.1 [--notarize]" >&2
+  echo "          or:    make -C port release VERSION=2.12.5.1 NOTARIZE=1" >&2
   exit 1
 fi
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
