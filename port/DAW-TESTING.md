@@ -122,9 +122,19 @@ Inspect Element) and the per-tick viz dump (`window.__calfnxtDumpViz()`).
   delayed with the lookahead, so a unity-gain band is not a phantom diff).
 - [ ] Header viz rate: 30 Hz is visibly faster than 25 Hz.
 
+## 13. 2.12.6 look
+
+- [ ] Day theme backgrounds are lighter. Accent order is calfNXT, Fire, Lime,
+  Sea, Slick.
+- [ ] **Analyzer** day spectrum and waterfall draw, and L/R/RMS/Hold can hide
+  traces. RMS is a solid line.
+- [ ] Header In and Out meters show a clip light and are not cut off at 0.
+- [ ] **Chorus** charts sit in a titled block. **Tuner** pitch-roll colors
+  and **Equalizer** miniature handles match the theme.
+
 ## Known limitations (by design, this release)
 
-- Shipped binaries are upstream **v2.12.5** plugin changes plus local patches
+- Shipped binaries are upstream **v2.12.6** plugin changes plus local patches
   0004 (Impulse macOS library path) and 0005 (Tamer and Multiband Limiter
   graph decay on transport stop). Tamer and Crusher 64-bit processing landed
   upstream in 2.10.0. The dynamics and Impulse realtime-safety work landed

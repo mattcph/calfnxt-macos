@@ -68,12 +68,14 @@ make check                      # seam drift + validator (all 26)
 
 `tools/upstream-sync.sh` checks out the tag, then walks `patches/` in order.
 A patch is reapplied only when it is still needed: 0004 when `configDir()`
-has no macOS library path. A rewrite that already does the job is skipped and
-the patch file is left in place. Sync stops when the old behavior remains
-and the hunks no longer fit. It then classifies each changed upstream path
-as **PORTABLE** (take it: DSP, UI, descriptors), **SEAM** (review against
-the overlay), or **IGNORED** (Linux-only: web_host, GTK, X11), and re-runs
-the seam checks.
+has no macOS library path, 0005 when Tamer's silence path has no `vizFloor_`.
+A rewrite that already does the job is skipped and the patch file is left in
+place. Sync stops when the old behavior remains and the hunks no longer fit.
+Changed paths are then matched against `upstream-paths.txt`: **allow** is
+taken, **known-out** is skipped (website studio, Linux editor). A path on
+neither list is not taken and sync stops so it can be added, or left
+unlisted so the next change asks again. Allow paths that touch the seam
+are still printed for review. Seam checks run after that.
 
 ## Never reintroduce
 
@@ -90,8 +92,8 @@ make                    # all 26 plugins (UI + DSP + bundle + ad-hoc sign)
 make PLUGIN=compressor  # one plugin
 make install            # ~/Library/Audio/Plug-Ins/VST3
 make check              # seam drift + Steinberg validator (all 26)
-make release VERSION=2.12.5.1            # clean rebuild + Developer ID sign → Releases/2.12.5.1/
-make release VERSION=2.12.5.1 NOTARIZE=1 #   + notarize + staple
+make release VERSION=2.12.6.1            # clean rebuild + Developer ID sign → Releases/2.12.6.1/
+make release VERSION=2.12.6.1 NOTARIZE=1 #   + notarize + staple
 ```
 
 Apple Silicon (`arm64`) only, macOS 13+, VST3 only. See `README.md`.

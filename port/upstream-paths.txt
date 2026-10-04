@@ -1,0 +1,26 @@
+# Paths taken from an upstream calfNXT tag into the macOS plugin set.
+#
+# allow      take the change
+# known-out  skip it
+#
+# A changed path on neither list is not taken. Sync stops so it can be
+# added here, or left unlisted so the next change asks again.
+#
+# A trailing slash matches that directory. * is a glob.
+
+allow CMakeLists.txt
+allow dsp/
+allow common/dsp/
+allow common/ui/viz_bin.h
+allow common/ui/viz_source.h
+allow common/ui/viz_hz.*
+allow tools/codegen/
+allow ui/
+
+known-out studio/
+known-out tools/website.sh
+known-out tools/release.sh
+known-out website/
+known-out common/ui/web_editor.cpp
+known-out common/ui/web_host*
+known-out ui/src/utils/studioApi.ts

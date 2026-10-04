@@ -88,24 +88,57 @@ if [ -z "$CHANGED" ] && [ "$reapplied" -eq 0 ]; then
   exit 0
 fi
 
-portable=(); seam=(); ignored=()
+# allow / known-out live in upstream-paths.txt. Anything else stops the sync.
+path_matches() {
+  local p="$1" pattern="$2"
+  case "$pattern" in
+    */) [[ "$p" == "$pattern"* ]] ;;
+    *\**) [[ "$p" == $pattern ]] ;;
+    *) [[ "$p" == "$pattern" ]] ;;
+  esac
+}
+
+classify_upstream_path() {
+  local p="$1" kind pattern
+  local listed
+  for listed in known-out allow; do
+    while read -r kind pattern; do
+      [[ -z "$kind" || "$kind" == \#* ]] && continue
+      [[ "$kind" == "$listed" ]] || continue
+      if path_matches "$p" "$pattern"; then
+        echo "$listed"
+        return
+      fi
+    done < "$PORT_DIR/upstream-paths.txt"
+  done
+  echo unlisted
+}
+
+portable=(); seam=(); ignored=(); unlisted=()
 while IFS= read -r p; do
   [ -z "$p" ] && continue
-  case "$p" in
-    # Linux-only: never reintroduce
-    common/ui/web_host*|common/ui/web_editor.cpp|*gtk*|*x11*|*socketpair*|\
-    tools/install-user-vst3.sh|tools/release.sh)
+  case "$(classify_upstream_path "$p")" in
+    known-out)
       ignored+=("$p") ;;
-    # Seam: review against the port overlay
-    common/ui/viz_bin.h|common/ui/viz_source.h|common/ui/viz_hz.*|\
-    common/dsp/effect_base.*|tools/codegen/*|ui/src/utils/bridge.ts|\
-    ui/src/utils/reportViewport.ts|*/CMakeLists.txt)
-      seam+=("$p") ;;
-    # Everything else (DSP, descriptors, React/AUX UI) is portable
-    *)
-      portable+=("$p") ;;
+    unlisted)
+      unlisted+=("$p") ;;
+    allow)
+      case "$p" in
+        common/ui/viz_bin.h|common/ui/viz_source.h|common/ui/viz_hz.*|\
+        common/dsp/effect_base.*|tools/codegen/*|ui/src/utils/bridge.ts|\
+        ui/src/utils/reportViewport.ts|*/CMakeLists.txt)
+          seam+=("$p") ;;
+        *)
+          portable+=("$p") ;;
+      esac ;;
   esac
 done <<< "$CHANGED"
+
+if [ "${#unlisted[@]}" -ne 0 ]; then
+  echo "UNLISTED (not taken — add to port/upstream-paths.txt, or leave unlisted):" >&2
+  printf '  %s\n' "${unlisted[@]}" >&2
+  exit 1
+fi
 
 echo "PORTABLE (take as-is):    ${#portable[@]}"
 printf '  %s\n' "${portable[@]:0:20}"
